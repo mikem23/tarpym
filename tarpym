@@ -1,0 +1,718 @@
+#!/usr/bin/python
+import argparse
+import base64
+import json
+import os
+import shutil
+import six
+import struct
+import subprocess
+import sys
+import rpm
+import tempfile
+
+from collections import OrderedDict
+from koji.util import DataWalker
+
+
+def main():
+    global args
+    parser = argparse.ArgumentParser(prog='tarpym', description='convert rpms to and from exploded contents')
+    parser.add_argument('-x', '--extract', action='store_true', help='Extract rpm file to directory')
+    parser.add_argument('-c', '--create', action='store_true', help='Create rpm file from directory')
+    parser.add_argument('-f', '--filename', help='RPM filename')
+    parser.add_argument('-d', '--directory', help='Directory of RPM contents')
+    parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
+    args = parser.parse_args()
+    if args.extract:
+        if not args.filename:
+            parser.error('Please provide a filename for extraction')
+        explode_rpm(args.filename, args.directory)
+    else:
+        if not args.directory:
+            parser.error('Please provide a directory of rpm contents')
+        create_rpm(args.directory, args.filename)
+
+
+def explode_rpm(rpmfile, directory=None):
+    # parse header
+    h = rip_rpm_hdr(rpmfile)
+    rh = RawHeader(h, decode=True, is_sig=False)
+    header = rh.to_dict()
+    # skipping sig header for now
+
+    sighdr = rip_rpm_sighdr(rpmfile)
+    rh = RawHeader(sighdr, decode=True, is_sig=True)
+    sigheader = rh.to_dict()
+
+    if directory is None:
+        # calculate destination dir
+        nvr = '%(name)s-%(version)s-%(release)s' % header['index']
+        arch = 'src' if header['index'].get('sourcepackage') else header['index']['arch']
+        base = f'{nvr}.{arch}'
+        dest = base
+        for i in range(2, 100):
+            if os.path.exists(dest):
+                dest = f'{base},{i}'
+                continue
+            break
+    else:
+        if os.path.exists(directory):
+            error('Destination directory already exists')
+        dest = directory
+    os.mkdir(dest)
+
+    fn = os.path.join(dest, 'header.json')
+    with open(fn, 'wt') as fd:
+        json.dump(header, fd, indent=4)
+
+    fn = os.path.join(dest, 'sig.json')
+    with open(fn, 'wt') as fd:
+        json.dump(sigheader, fd, indent=4)
+
+    if not args.no_payload:
+        pdir = os.path.join(dest, 'payload')
+        os.mkdir(pdir)
+        explode_payload(rpmfile, pdir)
+
+    print(f'Expoded {rpmfile} to {dest}')
+
+
+def create_rpm(directory, rpmfile=None):
+    if not os.path.isdir(directory):
+        error(f'No such directory: {directory}')
+
+    # load header metadata
+    fn = os.path.join(directory, 'header.json')
+    with open(fn, 'rt') as fd:
+        header = json.load(fd)
+
+    if rpmfile is None:
+        # generate filename from header info
+        nvr = '%(name)s-%(version)s-%(release)s' % header['index']
+        arch = 'src' if header['index'].get('sourcepackage') else header['index']['arch']
+        dest = f'{nvr}.{arch}.rpm'
+    else:
+        dest = rpmfile
+    if os.path.exists(dest):
+        error(f'RPM file already exists: {dest}')
+
+    lead = make_lead(header)
+    hdr = make_header(header)
+
+    # write payload to temporary file
+    tmpfile = tempfile.TemporaryFile('r+b')
+    write_payload(tmpfile, header, directory)
+
+    # TODO - proper sig generation
+    # sig = make_sig(hdr, tmpfile)
+    fn = os.path.join(directory, 'sig.json')
+    with open(fn, 'rt') as fd:
+        sigheader = json.load(fd)
+    sig = clone_sig(sigheader)
+
+    bufsize = 819200
+    with open(dest, 'wb') as fd:
+        fd.write(lead)
+        fd.write(sig)
+        fd.write(hdr)
+        tmpfile.seek(0)
+        shutil.copyfileobj(tmpfile, fd)
+
+
+def make_lead(header):
+    # See Maximum RPM, Appendix A, RPM File Format
+    # https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
+    # "Package files are written to disk in network byte order
+
+    #struct rpmlead {
+    #    unsigned char magic[4];        edab eedb
+    #    unsigned char major, minor;
+    #    short type;                    binary 0000, src 0001
+    #    short archnum;
+    #    char name[66];                 nvr padded/truncated
+    #    short osnum;                   0001 = linux
+    #    short signature_type;
+    #    char reserved[16];             0
+    #} ;
+
+    magic = b'\xED\xAB\xEE\xDB'
+    major = b'\x03'
+    minor = b'\x00'
+    # "Versions of RPM later than 2.1 create version 3.0 package files
+    _type = 1 if header['index'].get('sourcepackage') else 0
+    _type = struct.pack('!h', _type)
+    archnum = struct.pack('!h', 255)  # does this matter?
+    name = '%(name)s-%(version)s-%(release)s' % header['index']
+    name = name.encode(errors='surrogatepass')
+    #name = name.encode()
+    name = name[:66]
+    pad = b'\x00' * (66 - len(name))
+    name = name + pad
+    osnum = struct.pack('!h', 1)
+    sigtype = 5
+    sigtype = struct.pack('!h', 5)
+    reserved = b'\x00' * 16
+
+    lead = magic + major + minor + _type + archnum + name + osnum + sigtype + reserved
+    assert len(lead) == 96
+    return lead
+
+
+def make_header(header):
+    rh = RawHeader(header, is_sig=False)
+    return rh.header
+
+
+def write_payload(tmpfile, header, directory):
+    # TODO
+    pass
+
+
+def make_sig(hdr, tmpfile):
+    # XXX
+    rh = RawHeader({'version':1, 'index': {}}, is_sig=True)
+    return rh.header
+
+def clone_sig(sigheader):
+    rh = RawHeader(sigheader, is_sig=True)
+    return rh.header
+
+def error(msg):
+    print(msg)
+    sys.exit(1)
+
+
+def explode_payload(fn, dest):
+    """Write files from rpm payload to destination dir"""
+    cmd1 = ['rpm2cpio', fn]
+    cmd2 = ['cpio', '-iud']
+    p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(cmd2, cwd=dest, stdin=p1.stdout)
+    p1.stdout.close()
+    p2.communicate()
+    assert p1.wait() == 0
+    assert p2.wait() == 0
+
+
+# Constants #
+
+RPM_HEADER_MAGIC = six.b('\x8e\xad\xe8')
+RPM_TAG_HEADERSIGNATURES = 62
+RPM_TAG_FILEDIGESTALGO = 5011
+RPM_SIGTAG_DSA = 267
+RPM_SIGTAG_RSA = 268
+RPM_SIGTAG_PGP = 1002
+RPM_SIGTAG_MD5 = 1004
+RPM_SIGTAG_GPG = 1005
+
+RPM_FILEDIGESTALGO_IDS = {
+    # Taken from RFC 4880
+    # A missing algo ID means md5
+    None: 'MD5',
+    1: 'MD5',
+    2: 'SHA1',
+    3: 'RIPEMD160',
+    8: 'SHA256',
+    9: 'SHA384',
+    10: 'SHA512',
+    11: 'SHA224'
+}
+
+# rpm 4.12 introduces optional deps, but they can also be backported in some
+# rpm installations. So, we need to check their real support, not only rpm
+# version.
+SUPPORTED_OPT_DEP_HDRS = {}
+for h in (
+        'SUGGESTNAME', 'SUGGESTVERSION', 'SUGGESTFLAGS',
+        'ENHANCENAME', 'ENHANCEVERSION', 'ENHANCEFLAGS',
+        'SUPPLEMENTNAME', 'SUPPLEMENTVERSION', 'SUPPLEMENTFLAGS',
+        'RECOMMENDNAME', 'RECOMMENDVERSION', 'RECOMMENDFLAGS'):
+    SUPPORTED_OPT_DEP_HDRS[h] = hasattr(rpm, 'RPMTAG_%s' % h)
+
+
+# dependency types
+DEP_REQUIRE = 0
+DEP_PROVIDE = 1
+DEP_OBSOLETE = 2
+DEP_CONFLICT = 3
+DEP_SUGGEST = 4
+DEP_ENHANCE = 5
+DEP_SUPPLEMENT = 6
+DEP_RECOMMEND = 7
+
+# dependency flags
+RPMSENSE_LESS = 2
+RPMSENSE_GREATER = 4
+RPMSENSE_EQUAL = 8
+
+
+def ensuredir(directory):
+    """Create directory, if necessary.
+
+    :param str directory: path of the directory
+
+    :returns: str: normalized directory path
+
+    :raises OSError: If argument already exists and is not a directory, or
+                     error occurs from underlying `os.mkdir`.
+    """
+    directory = os.path.normpath(directory)
+    if os.path.exists(directory):
+        if not os.path.isdir(directory):
+            raise OSError("Not a directory: %s" % directory)
+    else:
+        head, tail = os.path.split(directory)
+        if not tail and head == directory:
+            # can only happen if directory == '/' or equivalent
+            # (which obviously should not happen)
+            raise OSError("root directory missing? %s" % directory)
+        if head:
+            ensuredir(head)
+        # note: if head is blank, then we've reached the top of a relative path
+        try:
+            os.mkdir(directory)
+        except OSError:
+            # do not thrown when dir already exists (could happen in a race)
+            if not os.path.isdir(directory):
+                # something else must have gone wrong
+                raise
+    return directory
+
+
+def multibyte(data):
+    """Convert a list of bytes to an integer (network byte order)"""
+    sum = 0
+    n = len(data)
+    for i in range(n):
+        sum += data[i] << (8 * (n - i - 1))
+    return sum
+
+
+def find_rpm_sighdr(path):
+    """Finds the offset and length of the signature header."""
+    # see Maximum RPM Appendix A: Format of the RPM File
+
+    # The lead is a fixed sized section (96 bytes) that is mostly obsolete
+    sig_start = 96
+    sigsize = rpm_hdr_size(path, sig_start, pad=True)
+    # "As of RPM 2.1 ... the Signature section is padded to a multiple of 8 bytes"
+    return (sig_start, sigsize)
+
+
+def rpm_hdr_size(f, ofs=None, pad=False):
+    """Returns the length (in bytes) of the rpm header
+
+    f = filename or file object
+    ofs = offset of the header
+    """
+    if isinstance(f, six.string_types):
+        fo = open(f, 'rb')
+    else:
+        fo = f
+    if ofs is not None:
+        fo.seek(ofs, 0)
+    magic = fo.read(3)
+    if magic != RPM_HEADER_MAGIC:
+        raise ValueError("Invalid rpm: bad magic: %r" % magic)
+
+    # skip past section magic and such
+    #   (3 bytes magic, 1 byte version number, 4 bytes reserved)
+    fo.seek(ofs + 8, 0)
+
+    # now read two 4-byte integers which tell us
+    #  - # of index entries
+    #  - bytes of data in header
+    data = [_ord(x) for x in fo.read(8)]
+    il = multibyte(data[0:4])
+    dl = multibyte(data[4:8])
+
+    # this is what the section data says the size should be
+    hdrsize = 8 + 16 * il + dl
+
+    if pad:
+        # signature headers are padded to a multiple of 8 bytes
+        hdrsize = hdrsize + (8 - (hdrsize % 8)) % 8
+
+    # add eight bytes for section header
+    hdrsize = hdrsize + 8
+
+    if isinstance(f, six.string_types):
+        fo.close()
+    return hdrsize
+
+
+class RawHeader(object):
+
+    # see Maximum RPM Appendix A: Format of the RPM File
+
+    def __init__(self, data, decode=False, is_sig=None):
+        self._tag_map = None
+        self.decode = decode
+        self._is_sig = is_sig  # None means auto-detect
+        if isinstance(data, dict):
+            self._orig = data
+            data = self.make_header(data)
+        if data[0:3] != RPM_HEADER_MAGIC:
+            raise ValueError("Invalid rpm header: bad magic: %r" % (data[0:3],))
+        self.header = data
+        self._index()
+
+    @property
+    def is_sig(self):
+        if self._is_sig is None:
+            # detect whether this is a signature header
+            if hasattr(self, 'index'):
+                self._is_sig = bool(self.get(RPM_TAG_HEADERSIGNATURES))
+            elif hasattr(self, '_orig'):
+                self._is_sig = bool(self._orig.get('headersignatures'))
+        return self._is_sig
+
+    def get_tag_map(self):
+        # map some rpmtag codes
+        tags = {}
+        if rpm:
+            for name, code in six.iteritems(rpm.__dict__):
+                if name.startswith('RPMTAG_') and isinstance(code, int):
+                    tags[code] = name[7:].lower()
+        else:
+            print("rpm's python bindings are not installed. Unable to convert tag codes")
+        if self.is_sig:
+            # signature headers have a few different values
+            # the SIGTAG_* values are not exposed in the python api
+            # see rpmtag.h
+            tags[1000] = 'size'
+            tags[1001] = 'lemd5_1'
+            tags[1002] = 'pgp'
+            tags[1003] = 'lemd5_2'
+            tags[1004] = 'md5'
+            tags[1005] = 'gpg'
+            tags[1006] = 'pgp5'
+            tags[1007] = 'payloadsize'
+            tags[1008] = 'reservedspace'
+        return tags
+
+    @property
+    def tag_map(self):
+        if self._tag_map is None:
+            self._tag_map = self.get_tag_map()
+        return self._tag_map
+
+    def get_tag_name(self, code):
+        if code in self.tag_map:
+            return self.tag_map[code]
+        else:
+            return "RPM Tag %i" % code
+
+    def version(self):
+        # fourth byte is the version
+        return _ord(self.header[3])
+
+    def _index(self):
+        # read two 4-byte integers which tell us
+        #  - # of index entries  (each 16 bytes long)
+        #  - bytes of data in header
+        data = [_ord(x) for x in self.header[8:12]]
+        il = multibyte(data[:4])
+        dl = multibyte(data[4:8])
+
+        # read the index (starts at offset 16)
+        order = []
+        for i in range(il):
+            entry = []
+            for j in range(4):
+                ofs = 16 + i * 16 + j * 4
+                data = [_ord(x) for x in self.header[ofs:ofs + 4]]
+                entry.append(multibyte(data))
+
+            # print("Tag: %d, Type: %d, Offset: %x, Count: %d" % tuple(entry))
+            order.append(entry)
+        self.datalen = dl
+        self._order = order
+        self.index = dict([(entry[0], entry) for entry in order])
+
+    def to_dict(self, sig=None, decode=None):
+        """Return an ordered dictionary representing the header contents"""
+        result = OrderedDict()
+
+        # first 3 bytes are magic
+        # 4th byte is version
+        result['version'] = self.version()
+
+        # next 4 bytes are reserved, i.e. data[4:7]
+
+        # at this point the remainder of the header is index
+        # these will be in same order that the header index has them
+        idx = result['index'] = OrderedDict()
+        # calculate the start of the store
+        il = len(self._order)
+        store = 16 + il * 16
+        order = list(self._order)  # copy
+        order.sort(key=lambda x: x[2])  # sort by offset in store rather than position in index
+        for rpmtag, dtype, offset, count in order:
+            pos = store + offset
+            key = self.get_tag_name(rpmtag)
+            value = self.get(rpmtag, decode=decode)
+            if dtype not in (4, 6, 9):
+                # record explicit dtype
+                # otherwise we can't distinguish later
+                value = OrderedDict(
+                    value=value,
+                    dtype=dtype,
+                )
+            idx[key] = value
+        return encode_bytes_recurse(result)
+
+    def make_header(self, data):
+        """Create binary header data from a dictionary"""
+        version = data['version']
+        index = data['index']
+
+        # reverse tag_map
+        tagmap = self.tag_map
+        keymap = {tagmap[k]: k for k in tagmap}
+        if self.is_sig:
+            keymap['size'] = 1000  # XXX workaround
+
+        idx = []
+        store = []
+        ofs = 0
+        int_fmt = {1: 'B', 2: 'B', 3:'H', 4: 'I', 5: 'q'}  # codes for struct.pack
+        align = {3: 2, 4: 4, 5: 8}
+        # XXX should int64 be unsigned as well? is unsigned ok for the others?
+        print('Got %i index entries' % len(index))
+        for key in index:
+            # need tag, dtype, offset, count for index
+            rpmtag = keymap[key]
+            tagdata = index[key]
+            if isinstance(tagdata, dict):
+                dtype = tagdata['dtype']
+                value = tagdata['value']
+            elif isinstance(tagdata, str):
+                dtype = 6
+                value = tagdata
+            elif isinstance(tagdata, list):
+                if isinstance(tagdata[0], int):
+                    # without explicit dtype, assume int32
+                    dtype = 4
+                    value = tagdata
+                elif isinstance(tagdata[0], str):
+                    # treat lists of strings as i18n string arrays
+                    # (regular string arrays are less frequent)
+                    dtype = 9
+                    value = tagdata
+            pad = 0
+            if dtype == 0:
+                # null
+                assert value == None
+                count = 1  # XXX?
+                blob = b''
+            elif dtype <= 5:
+                # integer types
+                count = len(value)
+                fmt = f'!{count}{int_fmt[dtype]}'
+                blob = struct.pack(fmt, *value)
+                size = align.get(dtype)
+                if size:
+                    pad = (size - (ofs % size)) % size
+                    blob = b'\00' * pad + blob
+            elif dtype == 6:
+                # string
+                count = 1
+                blob = value.encode(errors='surrogatepass') + b'\0'
+            elif dtype == 7:
+                blob = base64.b64decode(value)
+                count = len(blob)
+            elif dtype in (8, 9):
+                # string array or i18n string array
+                count = len(value)
+                blob = b'\0'.join([v.encode(errors='surrogatepass') for v in value]) + b'\0'
+
+            store.append(blob)
+
+            # workaround - mimic index placement for special tags
+            prepend = False
+            if self.is_sig:
+                if rpmtag == 62:  # headersignatures
+                    prepend = True
+            elif rpmtag == 63:  # headerimmutable
+                prepend = True
+            if prepend:
+                idx.insert(0, [rpmtag, dtype, ofs + pad, count])
+            else:
+                idx.append([rpmtag, dtype, ofs + pad, count])
+            ofs += len(blob)
+
+        print('Got %i index entries' % len(idx))
+
+        # make the index blob
+        parts = [RPM_HEADER_MAGIC,
+                 struct.pack('!B', version),
+                 b'\00\00\00\00',  # reserved
+                 struct.pack('!I', len(idx)),
+                 struct.pack('!I', ofs)]
+        for rpmtag, dtype, ofs, count in idx:
+            parts.append(struct.pack('!IIII', rpmtag, dtype, ofs, count))
+        parts.extend(store)
+
+        blob = b''.join(parts)
+        if self.is_sig:
+            # "As of RPM 2.1 ... the Signature section is padded to a multiple of 8 bytes"
+            pad = (8 - (len(blob) % 8)) % 8
+            if pad:
+                blob += b'\00' * pad
+
+        return blob
+
+    def decode_bytes(self, value):
+        if six.PY2:
+            return value
+        else:
+            return value.decode(errors='surrogateescape')
+
+    def __getitem__(self, key):
+        tag, dtype, offset, count = self.index[key]
+        assert tag == key
+        return self._getitem(dtype, offset, count)
+
+    def _getitem(self, dtype, offset, count, decode=None):
+        if decode is None:
+            decode = self.decode
+        # calculate start of store
+        il = len(self._order)
+        store = 16 + il * 16
+        pos = store + offset
+        if dtype >= 2 and dtype <= 5:
+            values = []
+            for _ in range(count):
+                n = 1 << (dtype - 2)
+                # n-byte integer
+                data = [_ord(x) for x in self.header[pos:pos + n]]
+                values.append(multibyte(data))
+                pos += n
+            return values
+        elif dtype == 1:
+            # char treated like int8
+            return [_ord(c) for c in self.header[pos:pos + count]]
+        elif dtype == 6:
+            # string (null terminated)
+            end = self.header.find(six.b('\0'), pos)
+            value = self.header[pos:end]
+            if decode:
+                value = self.decode_bytes(value)
+            return value
+        elif dtype == 7:
+            # raw data
+            return self.header[pos:pos + count]
+        elif dtype == 8:
+            # string array
+            result = []
+            for _ in range(count):
+                end = self.header.find(six.b('\0'), pos)
+                value = self.header[pos:end]
+                if decode:
+                    value = self.decode_bytes(value)
+                result.append(value)
+                pos = end + 1
+            return result
+        elif dtype == 9:
+            # i18n string array
+            # note that we do not apply localization
+            result = []
+            for _ in range(count):
+                end = self.header.find(six.b('\0'), pos)
+                value = self.header[pos:end]
+                if decode:
+                    value = self.decode_bytes(value)
+                result.append(value)
+                pos = end + 1
+            return result
+        else:
+            raise ValueError("Unknown header data type: %x" % dtype)
+
+    def get(self, key, default=None, decode=None, single=False):
+        # With decode on, we will _mostly_ return the same value that rpmlib will.
+        # There are exceptions where rpmlib will automatically translate or update values, e.g.
+        # * fields that rpm treats as scalars
+        # * special tags like Headerimmutable
+        # * i18n string translations
+        # * the Fileclass extension tag that overlaps a concrete tag
+        # * auto converting PREINPROG/POSTINPROG/etc to string arrays for older rpms
+        entry = self.index.get(key)
+        if entry is None:
+            return default
+        else:
+            value = self._getitem(*entry[1:], decode=decode)
+            if single and isinstance(value, list):
+                if len(value) == 1:
+                    return value[0]
+                else:
+                    raise ValueError('single value requested for array at key %s' % key)
+            return value
+
+
+def encode_bytes(value):
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode('ascii')
+    else:
+        return value
+
+
+def encode_bytes_recurse(value):
+    walker = DataWalker(value, encode_bytes)
+    return walker.walk()
+
+
+def rip_rpm_sighdr(src):
+    """Rip the signature header out of an rpm"""
+    (start, size) = find_rpm_sighdr(src)
+    fo = open(src, 'rb')
+    fo.seek(start, 0)
+    sighdr = fo.read(size)
+    fo.close()
+    return sighdr
+
+
+def rip_rpm_hdr(src):
+    """Rip the main header out of an rpm"""
+    (start, size) = find_rpm_sighdr(src)
+    start += size
+    size = rpm_hdr_size(src, start)
+    fo = open(src, 'rb')
+    fo.seek(start, 0)
+    hdr = fo.read(size)
+    fo.close()
+    return hdr
+
+
+def _ord(s):
+    """Convert a string (single character) to an int (byte).
+
+    Use this method to get bytes from RPM headers in Python 2 and 3.
+
+    :returns: int
+    """
+    if isinstance(s, int):
+        # In Python 3, RPM headers are bytes (sequences of integers), so we
+        # already have an int here:
+        return s
+    else:
+        # In Python 2, RPM headers are strings, so we have a one-character
+        # string here, which we must convert to an int:
+        return ord(s)
+
+
+def hex_string(s):
+    """Converts a string to a string of hex digits"""
+    return ''.join(['%02x' % _ord(x) for x in s])
+
+
+if __name__ == '__main__':
+    import traceback
+    import pdb
+    try:
+        main()
+    except Exception:
+        etype, e, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
