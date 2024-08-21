@@ -461,7 +461,77 @@ class RawHeader(object):
                     dtype=dtype,
                 )
             idx[key] = value
+
+        # group file data for convenience and readability
+        if 'basenames' in idx:
+            basenames = idx['basenames']
+            if isinstance(basenames, dict):
+                basenames = basenames['value']
+            files = result['files'] = [OrderedDict(basename=v) for v in basenames]
+            del idx['basenames']
+            for key, subkey in self.filesmap:
+                if key not in idx:
+                    continue
+                previous = idx[key]
+                if isinstance(previous, dict):
+                    dtype = previous['dtype']
+                    previous = previous['value']
+                    # TODO handle dtype
+                if len(previous) != len(files):
+                    # XXX should never happen
+                    print(f'File header length mismatch for {key} '
+                          f'{len(previous)} != {len(files)}')
+                    continue
+                for i, finfo in enumerate(files):
+                    finfo[subkey] = previous[i]
+                del idx[key]
+
+            # dereference dirnames
+            dirnames = idx.get('dirnames', None)
+            if isinstance(dirnames, dict):
+                dirnames = dirnames['value']
+                # TODO dtypes
+            if dirnames and 'dirindexes' in idx:
+                dirindex = idx['dirindexes']
+                if isinstance(dirindex, dict):
+                    dirindex = dirindex['value']
+                if len(dirindex) != len(files):
+                    # XXX should never happen
+                    print(f'Directory index length mismatch: '
+                          f'{len(dirindex)} != {len(files)}')
+                else:
+                    for i, finfo in enumerate(files):
+                        dirnum = dirindex[i]
+                        if dirnum >= len(dirnames):
+                            raise ValueError(f'Directory index value out of bounds: {dirnum}')
+                        finfo['dirname'] = dirnames[dirnum]
+                del idx['dirnames']
+                del idx['dirindexes']
+
         return encode_bytes_recurse(result)
+
+    filesmap = [
+        ('filesizes', 'size'),
+        ('filemodes', 'mode'),
+        ('filerdevs', 'rdev'),
+        ('filemtimes', 'mtime'),
+        ('filemd5s', 'md5'),
+        ('filelinktos', 'linkto'),
+        ('fileflags', 'flags'),
+        ('fileusername', 'username'),
+        ('filegroupname', 'groupname'),
+        ('fileverifyflags', 'verifyflags'),
+        ('filedevices', 'device'),
+        ('fileinodes', 'inode'),
+        ('filelangs', 'lang'),
+        # ('dirindexes', 'dirindexes'),
+        # ('basenames', 'basenames'),
+        # ('*dirnames', '*dirnames'),
+        ('filecolors', 'color'),
+        ('fileclass', 'class'),
+        ('filedependsx', 'dependsx'),
+        ('filedependsn', 'dependsn'),
+    ]
 
     def make_header(self, data):
         """Create binary header data from a dictionary"""
