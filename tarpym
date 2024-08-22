@@ -11,7 +11,9 @@ import sys
 import rpm
 import tempfile
 
+
 from collections import OrderedDict
+from copy import deepcopy
 from koji.util import DataWalker
 
 
@@ -516,6 +518,41 @@ class RawHeader(object):
                 del idx['dirnames']
                 del idx['dirindexes']
 
+    def _ungroup_headers(self, data):
+        # ungroup file data
+        # returns an updated dict
+        data = deepcopy(data)
+        idx = data['index']
+
+        import pdb; pdb.set_trace()
+        if 'files' not in data:
+            return data
+            # TODO we'll need to adjust this when we handle further grouping
+
+        if 'basenames' in idx:
+            raise ValueError('Found duplicate files data')
+
+        fileheaders = {}
+        basenames = fileheaders['basenames'] = []
+        dirmap = OrderedDict()
+        for finfo in data['files']:
+            basenames.append(finfo['basename'])
+            if finfo['dirname'] not in dirmap:
+                # first time seeing, enumerate it in map
+                dirmap[finfo['dirname']] = len(dirmap)
+            dirindex = dirmap[finfo['dirname']]
+            fileheaders.setdefault('dirindexes', []).append(dirindex)
+            # i.e. if we haven't seen the dir yet, map it to its enumeration
+            for key, subkey in self.filesmap:
+                fileheaders.setdefault(key, []).append(finfo[subkey])
+                # TODO defaults for missing keys
+                # TODO handle dtypes
+        fileheaders['dirnames'] = list(dirmap)
+
+        del data['files']
+        idx.update(fileheaders)
+
+        return data
 
     filesmap = [
         ('filesizes', 'size'),
@@ -540,8 +577,32 @@ class RawHeader(object):
         ('filedependsn', 'dependsn'),
     ]
 
+    typemap = {
+        'filesizes': 4,
+        'filemodes': 3,
+        'filerdevs': 3,
+        'filemtimes': 4,
+        'filemd5s': 8,
+        'filelinktos': 8,
+        'fileflags': 4,
+        'fileusername': 8,
+        'filegroupname': 8,
+        'fileverifyflags': 4,
+        'filedevices': 4,
+        'fileinodes': 4,
+        'filelangs': 8,
+        'dirindexes': 4,
+        'basenames': 8,
+        '*dirnames': 8,
+        'filecolors': 4,
+        'fileclass': 4,
+        'filedependsx': 4,
+        'filedependsn': 4,
+    }
+
     def make_header(self, data):
         """Create binary header data from a dictionary"""
+        data = self._ungroup_headers(data)
         version = data['version']
         index = data['index']
 
@@ -565,6 +626,9 @@ class RawHeader(object):
             if isinstance(tagdata, dict):
                 dtype = tagdata['dtype']
                 value = tagdata['value']
+            elif key in self.typemap:
+                dtype = self.typemap[key]
+                value = tagdata
             elif isinstance(tagdata, str):
                 dtype = 6
                 value = tagdata
