@@ -524,7 +524,6 @@ class RawHeader(object):
         data = deepcopy(data)
         idx = data['index']
 
-        import pdb; pdb.set_trace()
         if 'files' not in data:
             return data
             # TODO we'll need to adjust this when we handle further grouping
