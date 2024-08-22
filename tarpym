@@ -463,6 +463,14 @@ class RawHeader(object):
             idx[key] = value
 
         # group file data for convenience and readability
+        self._group_headers(result)
+        return encode_bytes_recurse(result)
+
+    def _group_headers(self, result):
+        # modifies result
+        idx = result['index']
+
+        # group file data for convenience and readability
         if 'basenames' in idx:
             basenames = idx['basenames']
             if isinstance(basenames, dict):
@@ -508,7 +516,6 @@ class RawHeader(object):
                 del idx['dirnames']
                 del idx['dirindexes']
 
-        return encode_bytes_recurse(result)
 
     filesmap = [
         ('filesizes', 'size'),
