@@ -87,7 +87,7 @@ def create_rpm(directory, rpmfile=None):
     # load header metadata
     fn = os.path.join(directory, 'header.json')
     with open(fn, 'rt') as fd:
-        header = json.load(fd)
+        header = json.load(fd, object_hook=OrderedDict)
 
     if rpmfile is None:
         # generate filename from header info
@@ -110,7 +110,7 @@ def create_rpm(directory, rpmfile=None):
     # sig = make_sig(hdr, tmpfile)
     fn = os.path.join(directory, 'sig.json')
     with open(fn, 'rt') as fd:
-        sigheader = json.load(fd)
+        sigheader = json.load(fd, object_hook=OrderedDict)
     sig = clone_sig(sigheader)
 
     bufsize = 819200
@@ -610,6 +610,10 @@ class RawHeader(object):
         keymap = {tagmap[k]: k for k in tagmap}
         if self.is_sig:
             keymap['size'] = 1000  # XXX workaround
+
+        # make sure headerimmutable is at the end
+        if 'headerimmutable' in index:
+            index.move_to_end('headerimmutable')
 
         idx = []
         store = []
