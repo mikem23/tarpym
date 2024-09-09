@@ -518,6 +518,18 @@ class RawHeader(object):
                 del idx['dirnames']
                 del idx['dirindexes']
 
+        for key in self.zipmap:
+            if key in idx:
+                previous = idx[key]
+                if isinstance(previous, dict):
+                    dtype = previous['dtype']
+                    previous = previous['value']
+                    # TODO handle dtype
+                group, subkey = self.zipmap[key]
+                ginfo = result.setdefault(group, OrderedDict())
+                ginfo[subkey] = previous
+
+
     def _ungroup_headers(self, data):
         # ungroup file data
         # returns an updated dict
@@ -598,6 +610,30 @@ class RawHeader(object):
         'filedependsx': 4,
         'filedependsn': 4,
     }
+
+    # headers to "zip"
+    zipmap = (
+        # changelog
+        ('changelogtime', ('changelog', 'time')),
+        ('changelogname', ('changelog', 'name')),
+        ('changelogtext', ('changelog'), 'text')),
+        # provides
+        ('provides', ('provides', 'value')),
+        ('provideflags', ('provides', 'flags')),
+        ('provideversion', ('provides', 'version')),
+        # requires
+        ('requires', ('requires', 'value')),
+        ('requireflags', ('requires', 'flags')),
+        ('requireversion', ('requires', 'version')),
+        # obsoletes
+        ('obsoletes', ('obsoletes', 'value')),
+        ('obsoleteflags', ('obsoletes', 'flags')),
+        ('obsoleteversion', ('obsoletes', 'version')),
+        # conflicts
+        ('conflicts', ('conflicts', 'value')),
+        ('conflictflags', ('conflicts', 'flags')),
+        ('conflictversion', ('conflicts', 'version')),
+    )
 
     def make_header(self, data):
         """Create binary header data from a dictionary"""
