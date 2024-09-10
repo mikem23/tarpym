@@ -720,10 +720,26 @@ class RawHeader(object):
         align = {3: 2, 4: 4, 5: 8}
         # XXX should int64 be unsigned as well? is unsigned ok for the others?
         print('Got %i index entries' % len(index))
+
+        # figure out storage order
+        order = []
+        tail = []
         for key in index:
-            # need tag, dtype, offset, count for index
             rpmtag = keymap[key]
             tagdata = index[key]
+            dest = order
+            if self.is_sig:
+                if rpmtag == 62:  # headersignatures
+                    dest = tail
+            elif rpmtag == 63:  # headerimmutable
+                dest = tail
+            dest.append((rpmtag, key, tagdata))
+        order.sort()
+        order.extend(tail)
+
+        # generate the store and index listing
+        for rpmtag, key, tagdata in order:
+            # need tag, dtype, offset, count for index
             if isinstance(tagdata, dict):
                 dtype = tagdata['dtype']
                 value = tagdata['value']
@@ -785,7 +801,7 @@ class RawHeader(object):
                 idx.append([rpmtag, dtype, ofs + pad, count])
             ofs += len(blob)
 
-        print('Got %i index entries' % len(idx))
+        # print('Got %i index entries' % len(idx))
 
         # make the index blob
         parts = [RPM_HEADER_MAGIC,
