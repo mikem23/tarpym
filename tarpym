@@ -641,6 +641,7 @@ class RawHeader(object):
         'fileclass': 4,
         'filedependsx': 4,
         'filedependsn': 4,
+        'dirnames': 8,
         'changelogtime': 4,
         'changelogname': 8,
         'changelogtext': 8,
