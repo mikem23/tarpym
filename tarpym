@@ -518,6 +518,7 @@ class RawHeader(object):
                 del idx['dirnames']
                 del idx['dirindexes']
 
+        # the other groupings are simpler
         for group, gmap in self.zipmap:
             glist = None
             for key, subkey in gmap:
@@ -551,10 +552,28 @@ class RawHeader(object):
         data = deepcopy(data)
         idx = data['index']
 
-        if 'files' not in data:
-            return data
-            # TODO we'll need to adjust this when we handle further grouping
+        self._ungroup_files(data)
 
+        for group, gmap in self.zipmap:
+            if group not in data:
+                continue
+
+            gheaders = {}
+            for ginfo in data[group]:
+                for key, subkey in gmap:
+                    gheaders.setdefault(key, []).append(ginfo[subkey])
+
+            del data[group]
+            idx.update(gheaders)
+
+        return data
+
+    def _ungroup_files(self, data):
+        # modifies data in place
+        if 'files' not in data:
+            return
+
+        idx = data['index']
         if 'basenames' in idx:
             raise ValueError('Found duplicate files data')
 
@@ -577,8 +596,6 @@ class RawHeader(object):
 
         del data['files']
         idx.update(fileheaders)
-
-        return data
 
     filesmap = [
         ('filesizes', 'size'),
