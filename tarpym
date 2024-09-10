@@ -641,6 +641,21 @@ class RawHeader(object):
         'fileclass': 4,
         'filedependsx': 4,
         'filedependsn': 4,
+        'changelogtime': 4,
+        'changelogname': 8,
+        'changelogtext': 8,
+        'provides': 8,
+        'provideflags': 4,
+        'provideversion': 8,
+        'requires': 8,
+        'requireflags': 4,
+        'requireversion': 8,
+        'obsoletes': 8,
+        'obsoleteflags': 4,
+        'obsoleteversion': 8,
+        'conflicts': 8,
+        'conflictflags': 4,
+        'conflictversion': 8,
     }
 
     # headers to "zip"
