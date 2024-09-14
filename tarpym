@@ -117,7 +117,7 @@ def create_rpm(directory, rpmfile=None):
     #     sigheader = json.load(fd, object_hook=OrderedDict)
     # sig = clone_sig(sigheader)
 
-    bufsize = 819200
+    # bufsize = 819200
     with open(dest, 'wb') as fd:
         fd.write(lead)
         fd.write(sig)
@@ -131,16 +131,16 @@ def make_lead(header):
     # https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
     # "Package files are written to disk in network byte order
 
-    #struct rpmlead {
-    #    unsigned char magic[4];        edab eedb
-    #    unsigned char major, minor;
-    #    short type;                    binary 0000, src 0001
-    #    short archnum;
-    #    char name[66];                 nvr padded/truncated
-    #    short osnum;                   0001 = linux
-    #    short signature_type;
-    #    char reserved[16];             0
-    #} ;
+    # struct rpmlead {
+    #     unsigned char magic[4];        edab eedb
+    #     unsigned char major, minor;
+    #     short type;                    binary 0000, src 0001
+    #     short archnum;
+    #     char name[66];                 nvr padded/truncated
+    #     short osnum;                   0001 = linux
+    #     short signature_type;
+    #     char reserved[16];             0
+    # } ;
 
     magic = b'\xED\xAB\xEE\xDB'
     major = b'\x03'
@@ -151,7 +151,6 @@ def make_lead(header):
     archnum = struct.pack('!h', 255)  # does this matter?
     name = '%(name)s-%(version)s-%(release)s' % header['index']
     name = name.encode(errors='surrogatepass')
-    #name = name.encode()
     name = name[:66]
     pad = b'\x00' * (66 - len(name))
     name = name + pad
@@ -472,12 +471,12 @@ class RawHeader(object):
         # these will be in same order that the header index has them
         idx = result['index'] = OrderedDict()
         # calculate the start of the store
-        il = len(self._order)
-        store = 16 + il * 16
+        # il = len(self._order)
+        # store = 16 + il * 16
         order = list(self._order)  # copy
         order.sort(key=lambda x: x[2])  # sort by offset in store rather than position in index
         for rpmtag, dtype, offset, count in order:
-            pos = store + offset
+            # pos = store + offset
             key = self.get_tag_name(rpmtag)
             value = self.get(rpmtag, decode=decode)
             if dtype not in (4, 6, 9):
@@ -742,7 +741,7 @@ class RawHeader(object):
         idx = []
         store = []
         ofs = 0
-        int_fmt = {1: 'B', 2: 'B', 3:'H', 4: 'I', 5: 'q'}  # codes for struct.pack
+        int_fmt = {1: 'B', 2: 'B', 3: 'H', 4: 'I', 5: 'q'}  # codes for struct.pack
         align = {3: 2, 4: 4, 5: 8}
         # XXX should int64 be unsigned as well? is unsigned ok for the others?
         print('Got %i index entries' % len(index))
@@ -788,7 +787,7 @@ class RawHeader(object):
             pad = 0
             if dtype == 0:
                 # null
-                assert value == None
+                assert value is None
                 count = 1  # XXX?
                 blob = b''
             elif dtype <= 5:
