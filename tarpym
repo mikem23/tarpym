@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -106,12 +107,15 @@ def create_rpm(directory, rpmfile=None):
     tmpfile = tempfile.TemporaryFile('r+b')
     write_payload(tmpfile, header, directory)
 
-    # TODO - proper sig generation
-    # sig = make_sig(hdr, tmpfile)
-    fn = os.path.join(directory, 'sig.json')
-    with open(fn, 'rt') as fd:
-        sigheader = json.load(fd, object_hook=OrderedDict)
-    sig = clone_sig(sigheader)
+    # make signature header
+    sig = make_sig(hdr, tmpfile)
+    # do we need the payload tempfile?
+
+    # alternate code that just copies old sig instead
+    # fn = os.path.join(directory, 'sig.json')
+    # with open(fn, 'rt') as fd:
+    #     sigheader = json.load(fd, object_hook=OrderedDict)
+    # sig = clone_sig(sigheader)
 
     bufsize = 819200
     with open(dest, 'wb') as fd:
@@ -172,13 +176,34 @@ def write_payload(tmpfile, header, directory):
 
 
 def make_sig(hdr, tmpfile):
-    # XXX
-    rh = RawHeader({'version':1, 'index': {}}, is_sig=True)
+    # find sigmd5 and payloadsize
+    md5sum = hashlib.md5(hdr)
+    while True:
+        chunk = tmpfile.read(8192)
+        if not chunk:
+            break
+        md5sum.update(chunk)
+    payloadsize = tmpfile.tell()
+
+    index = {
+        "sha1header": hashlib.sha1(hdr).hexdigest(),
+        "sha256header": hashlib.sha256(hdr).hexdigest(),
+        "size": [132669],
+        "md5": {
+            "value": encode_bytes(md5sum.digest()),
+            "dtype": 7
+        },
+        "payloadsize": [payloadsize],
+    }
+    data = {'version': 1, 'index': index}
+    rh = RawHeader(data, is_sig=True)
     return rh.header
+
 
 def clone_sig(sigheader):
     rh = RawHeader(sigheader, is_sig=True)
     return rh.header
+
 
 def error(msg):
     print(msg)
