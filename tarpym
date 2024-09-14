@@ -194,6 +194,7 @@ def make_sig(hdr, tmpfile):
         },
         "payloadsize": [payloadsize],
     }
+    # TODO reservedspace, headersignatures
     data = {'version': 1, 'index': index}
     rh = RawHeader(data, is_sig=True)
     return rh.header
