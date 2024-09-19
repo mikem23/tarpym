@@ -193,8 +193,14 @@ def make_sig(hdr, tmpfile):
             "dtype": 7
         },
         "payloadsize": [payloadsize],
+        "reservedspace": {
+            # default __gpg_reserved_space (4096) plus 32
+            # see rpmGenerateSignature() in rpm source
+            "value": encode_bytes(b'\0' * 4128),
+            "dtype": 7
+        },
     }
-    # TODO reservedspace, headersignatures
+    # TODO headersignatures
     data = {'version': 1, 'index': index}
     rh = RawHeader(data, is_sig=True)
     return rh.header
