@@ -201,23 +201,7 @@ def make_sig(hdr, tmpfile):
         },
     }
 
-    # add region tag
-    # see also:
-    #   https://rpm-software-management.github.io/rpm/manual/format_header.html#immutable-regions
-    #   https://dentrassi.de/2016/04/15/writing-rpm-files-in-plain-java/
-    tag = RPM_TAG_HEADERSIGNATURES
-    dtype = 7
-    offset = (len(index) + 1) * 16
-    # this is the offset *within the index* before which entries are immutable
-    # we add 1 to the length to account for the entry we're about to add
-    offset = -offset  # rpm negates this value
-    count = 16
-    fmt = r'!4i'  # 4 signed 4-byte ints, network order
-    blob = struct.pack(fmt, tag, dtype, offset, count)
-    index['headersignatures'] = {
-        "value": encode_bytes(blob),
-        "dtype": 7
-    }
+    # RawHeader will add region tag for us
 
     # assemble the data into a header
     data = {'version': 1, 'index': index}
@@ -774,19 +758,14 @@ class RawHeader(object):
 
         # figure out storage order
         order = []
-        tail = []
         for key in index:
             rpmtag = keymap[key]
             tagdata = index[key]
-            dest = order
-            if self.is_sig:
-                if rpmtag == 62:  # headersignatures
-                    dest = tail
-            elif rpmtag == 63:  # headerimmutable
-                dest = tail
-            dest.append((rpmtag, key, tagdata))
+            if rpmtag in (62, 63):  # headersignatures, headerimmutable
+                print(f'Warning: ignoring region tag in input data')
+                continue
+            order.append((rpmtag, key, tagdata))
         order.sort()
-        order.extend(tail)
 
         # generate the store and index listing
         for rpmtag, key, tagdata in order:
@@ -839,20 +818,30 @@ class RawHeader(object):
 
             store.append(blob)
 
-            # workaround - mimic index placement for special tags
-            prepend = False
-            if self.is_sig:
-                if rpmtag == 62:  # headersignatures
-                    prepend = True
-            elif rpmtag == 63:  # headerimmutable
-                prepend = True
-            if prepend:
-                idx.insert(0, [rpmtag, dtype, ofs + pad, count])
-            else:
-                idx.append([rpmtag, dtype, ofs + pad, count])
+            idx.append([rpmtag, dtype, ofs + pad, count])
             ofs += len(blob)
 
-        # print('Got %i index entries' % len(idx))
+        # add region tag
+        # see also:
+        #   https://rpm-software-management.github.io/rpm/manual/format_header.html#immutable-regions
+        #   https://dentrassi.de/2016/04/15/writing-rpm-files-in-plain-java/
+        if self.is_sig:
+            rpmtag = RPM_TAG_HEADERSIGNATURES
+        else:
+            rpmtag = 63  # XXX
+        dtype = 7
+        offset = (len(idx) + 1) * 16
+        # this is the offset *within the index* before which entries are immutable
+        # we add 1 to the length to account for the entry we're about to add
+        offset = -offset  # rpm negates this value
+        count = 16
+        fmt = r'!4i'  # 4 signed 4-byte ints, network order
+        blob = struct.pack(fmt, rpmtag, dtype, offset, count)
+        # no padding for this dtype
+        # region tag goes at the beginning of the index
+        idx.insert(0, [rpmtag, dtype, ofs, count])
+        store.append(blob)
+        ofs += len(blob)
 
         # make the index blob
         parts = [RPM_HEADER_MAGIC,
