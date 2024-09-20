@@ -200,7 +200,27 @@ def make_sig(hdr, tmpfile):
             "dtype": 7
         },
     }
-    # TODO headersignatures
+
+    # add region tag
+    # see also:
+    #   https://rpm-software-management.github.io/rpm/manual/format_header.html#immutable-regions
+    #   https://dentrassi.de/2016/04/15/writing-rpm-files-in-plain-java/
+    tag = RPM_TAG_HEADERSIGNATURES
+    dtype = 7
+    offset = -1  # XXX
+    # rpm docs say offset should be "Size of the region entries in the Index in bytes"
+    # rpm code always negates it
+    # the java implementation notes say "a negative offset, in bytes, of how many entries are
+    # considered immutable"
+    count = 16
+    fmt = r'!4i'  # 4 signed 4-byte ints, network order
+    blob = struct.pack(fmt, tag, dtype, offset, count)
+    index['headersignatures'] = {
+        "value": encode_bytes(blob),
+        "dtype": 7
+    }
+
+    # assemble the data into a header
     data = {'version': 1, 'index': index}
     rh = RawHeader(data, is_sig=True)
     return rh.header
