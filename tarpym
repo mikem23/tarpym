@@ -104,12 +104,11 @@ def create_rpm(directory, rpmfile=None):
     hdr = make_header(header)
 
     # write payload to temporary file
-    tmpfile = tempfile.TemporaryFile('r+b')
+    tmpfile = tempfile.TemporaryFile('w+b')
     write_payload(tmpfile, header, directory)
 
     # make signature header
     sig = make_sig(hdr, tmpfile)
-    # do we need the payload tempfile?
 
     # alternate code that just copies old sig instead
     # fn = os.path.join(directory, 'sig.json')
@@ -170,13 +169,44 @@ def make_header(header):
 
 
 def write_payload(tmpfile, header, directory):
-    # TODO
-    pass
+    # TODO handle "stripped down" cpio used for >4G
+    if args.no_payload:
+        # just leave it blank in this case
+        return
+    pdir = f'{directory}/payload'
+
+    # check that we have all the files
+    flist = []
+    for finfo in header['files']:
+        relpath = '%s/%s' % (finfo['dirname'].lstrip('/'), finfo['basename'])
+        fn = f'{pdir}/{relpath}'
+        if not os.path.exists(fn):
+            raise Exception(f'Missing payload file: {fn}')
+        flist.append(relpath)
+
+    # write the list to a temporary file
+    tmplist = tempfile.TemporaryFile('w+b')
+    for relpath in flist:
+        tmplist.write(relpath.encode(errors='surrogatepass'))
+        tmplist.write(b'\0')  # null separated
+
+    tmplist.seek(0)
+
+    cmd1 = ['cpio', '-o', '--force-local', '--null']
+    cmd2 = ['gzip', '-c']
+
+    p1 = subprocess.Popen(cmd1, cwd=pdir, stdin=tmplist, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=tmpfile)
+    p1.stdout.close()
+    p2.communicate()
+    assert p1.wait() == 0
+    assert p2.wait() == 0
 
 
 def make_sig(hdr, tmpfile):
     # find sigmd5 and payloadsize
     md5sum = hashlib.md5(hdr)
+    tmpfile.seek(0)
     while True:
         chunk = tmpfile.read(8192)
         if not chunk:
@@ -221,6 +251,7 @@ def error(msg):
 
 def explode_payload(fn, dest):
     """Write files from rpm payload to destination dir"""
+    # TODO handle "stripped down" cpio used for >4G
     cmd1 = ['rpm2cpio', fn]
     cmd2 = ['cpio', '-iud']
     p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
