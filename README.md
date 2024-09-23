@@ -3,7 +3,7 @@ convert rpms to and from exploded contents
 
 # example
 ```
-$ ./tarpym -x -d test -f ~/koji-1.34.1-1.noarch.rpm
+$ ./tarpym -x -d test -f koji-1.34.1-1.noarch.rpm
 1562 blocks
 Expoded koji-1.34.1-1.noarch.rpm to test
 $ vim test/header.json  # edit release value
@@ -12,13 +12,13 @@ $ ./tarpym -c -d test -f test.rpm
 Got 57 index entries
 Warning: ignoring region tag in input data
 Got 6 index entries
-[mikem@localhost tarpym]$ rpm -Kv test.rpm
+$ rpm -Kv test.rpm
 test.rpm:
     Header SHA256 digest: OK
     Header SHA1 digest: OK
     Payload SHA256 digest: OK
     MD5 digest: OK
-[mikem@localhost tarpym]$ rpm -qp test.rpm
+$ rpm -qp test.rpm
 koji-1.34.1-1.BUMP.noarch
 ```
 
