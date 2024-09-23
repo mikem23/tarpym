@@ -207,6 +207,19 @@ def write_payload(tmpfile, header, directory):
     header['index']['payloadcompressor'] = 'gzip'
     header['index']['payloadcompressor'] = 'zstd'
     header['index']['payloadflags'] = '19'
+    if 'payloaddigestalt' in header['index']:
+        # XXX skipping the uncompressed checksum for now
+        del header['index']['payloaddigestalt']  # XXX
+    header['index']['payloaddigestalgo'] = {'value': [8], 'dtype': 4}  # sha256
+
+    tmpfile.seek(0)
+    csum = hashlib.sha256()
+    while True:
+        chunk = tmpfile.read(8192)
+        if not chunk:
+            break
+        csum.update(chunk)
+    header['index']['payloaddigest'] = {'value': [csum.hexdigest()], 'dtype': 8}
 
 
 def make_sig(hdr, tmpfile):
