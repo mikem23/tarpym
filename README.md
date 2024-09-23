@@ -32,3 +32,9 @@ We omit the uncompressed payload checksum (payloaddigestalt).
 We unconditionally use zstd to compress the payload.
 
 We do not recalculate file checksums in the payload.
+
+Some parts of rpm to not like our payload. E.g.
+```
+$ rpm2archive test.rpm >/dev/null
+Segmentation fault (core dumped)
+```
