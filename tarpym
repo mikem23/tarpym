@@ -100,12 +100,12 @@ def create_rpm(directory, rpmfile=None):
     if os.path.exists(dest):
         error(f'RPM file already exists: {dest}')
 
-    lead = make_lead(header)
-    hdr = make_header(header)
-
-    # write payload to temporary file
+    # write out payload first so we can update the header
     tmpfile = tempfile.TemporaryFile('w+b')
     write_payload(tmpfile, header, directory)
+
+    lead = make_lead(header)
+    hdr = make_header(header)
 
     # make signature header
     sig = make_sig(hdr, tmpfile)
@@ -192,8 +192,8 @@ def write_payload(tmpfile, header, directory):
 
     tmplist.seek(0)
 
-    cmd1 = ['cpio', '-o', '--force-local', '--null']
-    cmd2 = ['gzip', '-c']
+    cmd1 = ['cpio', '-o', '--force-local', '--null', '-H', 'crc']
+    cmd2 = ['zstd', '-19']
 
     p1 = subprocess.Popen(cmd1, cwd=pdir, stdin=tmplist, stdout=subprocess.PIPE)
     p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=tmpfile)
@@ -201,6 +201,12 @@ def write_payload(tmpfile, header, directory):
     p2.communicate()
     assert p1.wait() == 0
     assert p2.wait() == 0
+
+    # XXX make this more flexible
+    header['index']['payloadformat'] = 'cpio'
+    header['index']['payloadcompressor'] = 'gzip'
+    header['index']['payloadcompressor'] = 'zstd'
+    header['index']['payloadflags'] = '19'
 
 
 def make_sig(hdr, tmpfile):
