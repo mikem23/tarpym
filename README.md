@@ -3,16 +3,32 @@ convert rpms to and from exploded contents
 
 # example
 ```
-$ ./tarpym -x -d foo -f ~/koji-1.34.1-1.noarch.rpm
+$ ./tarpym -x -d test -f ~/koji-1.34.1-1.noarch.rpm
 1562 blocks
-Expoded /home/mikem/koji-1.34.1-1.noarch.rpm to foo
-$ ./tarpym -c -d foo -f test.rpm
-Got 58 index entries
-Got 58 index entries
-Got 7 index entries
-Got 7 index entries
-$ rpm -qp test.rpm
-koji-1.34.1-1.noarch
+Expoded koji-1.34.1-1.noarch.rpm to test
+$ vim test/header.json  # edit release value
+$ ./tarpym -c -d test -f test.rpm
+1562 blocks
+Got 57 index entries
+Warning: ignoring region tag in input data
+Got 6 index entries
+[mikem@localhost tarpym]$ rpm -Kv test.rpm
+test.rpm:
+    Header SHA256 digest: OK
+    Header SHA1 digest: OK
+    Payload SHA256 digest: OK
+    MD5 digest: OK
+[mikem@localhost tarpym]$ rpm -qp test.rpm
+koji-1.34.1-1.BUMP.noarch
 ```
 
-currently the `--create` option omits the payload
+# limitations
+
+We use cpio to write the payload, so we cannot write the modified format that
+rpm uses for files > 4GB.
+
+We omit the uncompressed payload checksum (payloaddigestalt).
+
+We unconditionally use zstd to compress the payload.
+
+We do not recalculate file checksums in the payload.
