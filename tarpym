@@ -178,7 +178,7 @@ def write_payload(tmpfile, header, directory):
     # check that we have all the files
     flist = []
     for finfo in header['files']:
-        relpath = '%s/%s' % (finfo['dirname'].lstrip('/'), finfo['basename'])
+        relpath = './%s/%s' % (finfo['dirname'].lstrip('/'), finfo['basename'])
         fn = f'{pdir}/{relpath}'
         if not os.path.exists(fn):
             raise Exception(f'Missing payload file: {fn}')
@@ -187,12 +187,14 @@ def write_payload(tmpfile, header, directory):
     # write the list to a temporary file
     tmplist = tempfile.TemporaryFile('w+b')
     for relpath in flist:
+        # print(relpath)
         tmplist.write(relpath.encode(errors='surrogatepass'))
         tmplist.write(b'\0')  # null separated
 
     tmplist.seek(0)
 
-    cmd1 = ['cpio', '-o', '--force-local', '--null', '-H', 'crc']
+    cmd1 = ['cpio', '-o', '--null', '-H', 'crc', '--no-absolute-filenames',
+            '--ignore-devno', '--device-independent', '-v']
     cmd2 = ['zstd', '-19']
 
     p1 = subprocess.Popen(cmd1, cwd=pdir, stdin=tmplist, stdout=subprocess.PIPE)
@@ -673,8 +675,10 @@ class RawHeader(object):
             fileheaders.setdefault('dirindexes', []).append(dirindex)
             # i.e. if we haven't seen the dir yet, map it to its enumeration
             for key, subkey in self.filesmap:
+                if subkey not in finfo:
+                    # TODO defaults for missing keys?
+                    continue
                 fileheaders.setdefault(key, []).append(finfo[subkey])
-                # TODO defaults for missing keys
                 # TODO handle dtypes
         fileheaders['dirnames'] = list(dirmap)
 
