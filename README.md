@@ -1,6 +1,8 @@
 # tarpym
 convert rpms to and from exploded contents
 
+This is **proof-of-concept** code and should not be used for real work.
+
 # example
 ```
 $ ./tarpym -x -d test -f koji-1.34.1-1.noarch.rpm
@@ -23,6 +25,8 @@ koji-1.34.1-1.BUMP.noarch
 ```
 
 # limitations
+
+This is **proof-of-concept** code and should not be used for real work.
 
 We use cpio to write the payload, so we cannot write the modified format that
 rpm uses for files > 4GB.
