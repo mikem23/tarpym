@@ -2,10 +2,12 @@
 import argparse
 import base64
 import hashlib
+import jinja2
 import json
 import os
 import shutil
 import six
+import stat
 import struct
 import subprocess
 import sys
@@ -175,6 +177,20 @@ def write_payload(tmpfile, header, directory):
         return
     pdir = f'{directory}/payload'
 
+    # trying a different approach
+    fakehdr = build_payload(tmpfile, header, pdir)
+    for key in fakehdr['index']:
+        if key.startswith('payload'):
+            header['index'][key] = fakehdr['index'][key]
+    for key in header['index']:
+        if key.startswith('payload') and key not in fakehdr['index']:
+            print(f'Warning: dropping {key} field')
+            del header['index'][key]
+
+    return
+
+    # XXX old way...
+
     # check that we have all the files
     flist = []
     for finfo in header['files']:
@@ -222,6 +238,95 @@ def write_payload(tmpfile, header, directory):
             break
         csum.update(chunk)
     header['index']['payloaddigest'] = {'value': [csum.hexdigest()], 'dtype': 8}
+
+
+def build_payload(tmpfile, header, payload_dir):
+    # define a tempdir for rpmbuild
+    workdir = tempfile.mkdtemp()
+
+    # make the file list
+    flist = []
+    for finfo in header['files']:
+        if stat.S_ISREG(finfo['mode']):
+            flist.append('%(dirname)s%(basename)s' % finfo)
+    # flist = ['%(dirname)s%(basename)s' % f for f in header['files']]
+
+    # expand the spec template
+    env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
+    template = env.get_template('payload.spec')
+    contents = template.render(files=flist)
+    spec = f'{workdir}/payload.spec'
+    with open(spec, 'wt') as fp:
+        fp.write(contents)
+
+    ppath = os.path.abspath(payload_dir)
+    cmd = ['rpmbuild',
+           '--define', f'_topdir {workdir}',
+           '--define', f'_sourcedir {workdir}',
+           '--define', f'_builddir {workdir}',
+           '--define', f'_srcrpmdir {workdir}',
+           '--define', f'_rpmdir {workdir}',
+           '--define', f'payloaddir {ppath}',
+           '-bb', spec]
+    p = subprocess.run(cmd, capture_output=True)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr.decode('utf8'))
+        error('failed to build payload')
+    p.check_returncode()
+
+    # now rip the payload out of this rpm
+    tmp_rpm = f'{workdir}/noarch/payload-1-1.noarch.rpm'
+    # skip past the headers
+    (start, size) = find_rpm_sighdr(tmp_rpm)
+    start += size
+    size = rpm_hdr_size(tmp_rpm, start)
+    start += size
+    with open(tmp_rpm, 'rb') as inp:
+        inp.seek(start)
+        # TODO verify checksum
+        shutil.copyfileobj(inp, tmpfile)
+
+    # return the header for snatching a few things
+    h = rip_rpm_hdr(tmp_rpm)
+    rh = RawHeader(h, decode=True, is_sig=False)
+
+    shutil.rmtree(workdir)
+    return rh.to_dict()
+
+
+# This is a jinja2 template for a spec file
+TEMPLATE = '''
+Name:           payload
+Version:        1
+Release:        1
+Summary:        fake spec to get a payload
+License:        LGPL
+BuildArch:      noarch
+
+# we don't want any modifications to our files
+%define __os_install_post %{nil}
+
+%description
+We're only building an rpm to extract the payload, so only the files matter
+Also. This is a terrible hack.
+
+%install
+# payloaddir macro is passed in, so we just copy the files
+cp -ai %{payloaddir}/* %{buildroot}
+
+%files
+{%- for path in files %}
+{{ path }}
+{%- endfor %}
+
+%changelog
+* Wed Apr 23 2025 A Person <person at example.com> - 1.0-1
+- rpm is happier with a changelog
+'''
+
+
+templates = {'payload.spec': TEMPLATE}
+
 
 
 def make_sig(hdr, tmpfile):
