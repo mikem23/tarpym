@@ -105,11 +105,12 @@ def create_rpm(directory, rpmfile=None):
 
     # write out payload first so we can update the header
     tmpfile = tempfile.TemporaryFile('w+b')
+    p_info = {}
     if args.no_payload:
         # skip payload
         pass
     elif args.rpmbuild_payload:
-        build_payload(tmpfile, header, directory)
+        p_info = build_payload(tmpfile, header, directory)
     else:
         # use cpio
         write_payload(tmpfile, header, directory)
@@ -118,7 +119,12 @@ def create_rpm(directory, rpmfile=None):
     hdr = make_header(header)
 
     # make signature header
-    sig = make_sig(hdr, tmpfile)
+    psize = None
+    if p_info:
+        # rpmbuild case
+        psize = p_info['sighdr']['index']['payloadsize'][0]
+        # import pdb; pdb.set_trace()
+    sig = make_sig(hdr, tmpfile, psize=psize)
 
     # alternate code that just copies old sig instead
     # fn = os.path.join(directory, 'sig.json')
@@ -301,7 +307,14 @@ def build_payload(tmpfile, header, directory):
             print(f'Warning: dropping {key} field')
             del header['index'][key]
 
+    # also fetch the sighdr for later code to use
+    h = rip_rpm_sighdr(tmp_rpm)
+    rh = RawHeader(h, decode=True, is_sig=True)
+    fakesighdr = rh.to_dict()
+
     shutil.rmtree(workdir)
+
+    return {'hdr': fakehdr, 'sighdr': fakesighdr}
 
 
 # This is a jinja2 template for a spec file
@@ -339,21 +352,26 @@ templates = {'payload.spec': TEMPLATE}
 
 
 
-def make_sig(hdr, tmpfile):
+def make_sig(hdr, tmpfile, psize=None):
     # find sigmd5 and payloadsize
     md5sum = hashlib.md5(hdr)
-    tmpfile.seek(0)
-    while True:
-        chunk = tmpfile.read(8192)
-        if not chunk:
-            break
-        md5sum.update(chunk)
-    payloadsize = tmpfile.tell()
+    if psize is not None:
+        payloadsize = psize
+    else:
+        # XXX this is already compressed, we want the uncompressed size
+        # RPMSIGTAG_PAYLOADSIZE = 1007,/*!< internal uncompressed payload size (32bit) in bytes. */
+        tmpfile.seek(0)
+        while True:
+            chunk = tmpfile.read(8192)
+            if not chunk:
+                break
+            md5sum.update(chunk)
+        payloadsize = tmpfile.tell()
 
     index = {
         "sha1header": hashlib.sha1(hdr).hexdigest(),
         "sha256header": hashlib.sha256(hdr).hexdigest(),
-        "size": [132669],
+        "size": [132669],  # XXX
         "md5": {
             "value": encode_bytes(md5sum.digest()),
             "dtype": 7
