@@ -318,24 +318,21 @@ BuildArch:      noarch
 
 %description
 We're only building an rpm to extract the payload, so only the files matter
-Also. This is a terrible hack.
+Also, this is a terrible hack.
 
 %install
 # payloaddir macro is passed in, so we just copy the files
 cp -ai %{payloaddir}/* %{buildroot}
 
 %files
-{%- for path in files %}
-{{ path }}
-{%- endfor %}
-{%- for path in dirs %}
-%dir {{ path }}
-{%- endfor %}
+/*
 
 %changelog
 * Wed Apr 23 2025 A Person <person at example.com> - 1.0-1
 - rpm is happier with a changelog
 '''
+# FIXME the cp command could theoretically miss dotfiles
+# (granted it's not particularly sane to package dotfiles under root)
 
 
 templates = {'payload.spec': TEMPLATE}
