@@ -28,6 +28,7 @@ def main():
     parser.add_argument('-f', '--filename', help='RPM filename')
     parser.add_argument('-d', '--directory', help='Directory of RPM contents')
     parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
+    parser.add_argument('--rpmbuild-payload', action='store_true', help='use rpmbuild to construct the payload')
     args = parser.parse_args()
     if args.extract:
         if not args.filename:
@@ -104,7 +105,14 @@ def create_rpm(directory, rpmfile=None):
 
     # write out payload first so we can update the header
     tmpfile = tempfile.TemporaryFile('w+b')
-    write_payload(tmpfile, header, directory)
+    if args.no_payload:
+        # skip payload
+        pass
+    elif args.rpmbuild_payload:
+        build_payload(tmpfile, header, directory)
+    else:
+        # use cpio
+        write_payload(tmpfile, header, directory)
 
     lead = make_lead(header)
     hdr = make_header(header)
@@ -177,20 +185,6 @@ def write_payload(tmpfile, header, directory):
         return
     pdir = f'{directory}/payload'
 
-    # trying a different approach
-    fakehdr = build_payload(tmpfile, header, pdir)
-    for key in fakehdr['index']:
-        if key.startswith('payload'):
-            header['index'][key] = fakehdr['index'][key]
-    for key in header['index']:
-        if key.startswith('payload') and key not in fakehdr['index']:
-            print(f'Warning: dropping {key} field')
-            del header['index'][key]
-
-    return
-
-    # XXX old way...
-
     # check that we have all the files
     flist = []
     for finfo in header['files']:
@@ -240,7 +234,10 @@ def write_payload(tmpfile, header, directory):
     header['index']['payloaddigest'] = {'value': [csum.hexdigest()], 'dtype': 8}
 
 
-def build_payload(tmpfile, header, payload_dir):
+def build_payload(tmpfile, header, directory):
+
+    payload_dir = f'{directory}/payload'
+
     # define a tempdir for rpmbuild
     workdir = tempfile.mkdtemp()
 
@@ -255,7 +252,7 @@ def build_payload(tmpfile, header, payload_dir):
         elif stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
         # TODO others?
-    dlist = [d for d in dlist if d not in d_used]
+    #dlist = [d for d in dlist if d not in d_used]
 
     # expand the spec template
     env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
@@ -292,12 +289,19 @@ def build_payload(tmpfile, header, payload_dir):
         # TODO verify checksum
         shutil.copyfileobj(inp, tmpfile)
 
-    # return the header for snatching a few things
+    # copy payload fields from the header
     h = rip_rpm_hdr(tmp_rpm)
     rh = RawHeader(h, decode=True, is_sig=False)
+    fakehdr = rh.to_dict()
+    for key in fakehdr['index']:
+        if key.startswith('payload'):
+            header['index'][key] = fakehdr['index'][key]
+    for key in header['index']:
+        if key.startswith('payload') and key not in fakehdr['index']:
+            print(f'Warning: dropping {key} field')
+            del header['index'][key]
 
     shutil.rmtree(workdir)
-    return rh.to_dict()
 
 
 # This is a jinja2 template for a spec file
