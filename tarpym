@@ -664,13 +664,9 @@ class RawHeader(object):
         # at this point the remainder of the header is index
         # these will be in same order that the header index has them
         idx = result['index'] = OrderedDict()
-        # calculate the start of the store
-        # il = len(self._order)
-        # store = 16 + il * 16
         order = list(self._order)  # copy
         order.sort(key=lambda x: x[2])  # sort by offset in store rather than position in index
         for rpmtag, dtype, offset, count in order:
-            # pos = store + offset
             key = self.get_tag_name(rpmtag)
             value = self.get(rpmtag, decode=decode)
             if dtype not in (4, 6, 9):
@@ -684,7 +680,11 @@ class RawHeader(object):
 
         # group file data for convenience and readability
         self._group_headers(result)
-        return encode_bytes_recurse(result)
+
+        # fix encoding
+        result = encode_bytes_recurse(result)
+
+        return result
 
     def _group_headers(self, result):
         # modifies result
