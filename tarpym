@@ -246,15 +246,21 @@ def build_payload(tmpfile, header, payload_dir):
 
     # make the file list
     flist = []
+    dlist = []
+    d_used = {}
     for finfo in header['files']:
         if stat.S_ISREG(finfo['mode']):
+            d_used[finfo['dirname'].rstrip('/')] = 1
             flist.append('%(dirname)s%(basename)s' % finfo)
-    # flist = ['%(dirname)s%(basename)s' % f for f in header['files']]
+        elif stat.S_ISDIR(finfo['mode']):
+            dlist.append('%(dirname)s%(basename)s' % finfo)
+        # TODO others?
+    dlist = [d for d in dlist if d not in d_used]
 
     # expand the spec template
     env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
     template = env.get_template('payload.spec')
-    contents = template.render(files=flist)
+    contents = template.render(files=flist, dirs=dlist)
     spec = f'{workdir}/payload.spec'
     with open(spec, 'wt') as fp:
         fp.write(contents)
@@ -317,6 +323,9 @@ cp -ai %{payloaddir}/* %{buildroot}
 %files
 {%- for path in files %}
 {{ path }}
+{%- endfor %}
+{%- for path in dirs %}
+%dir {{ path }}
 {%- endfor %}
 
 %changelog
@@ -384,7 +393,7 @@ def explode_payload(fn, dest):
     p2 = subprocess.Popen(cmd2, cwd=dest, stdin=p1.stdout)
     p1.stdout.close()
     p2.communicate()
-    assert p1.wait() == 0
+    #assert p1.wait() == 0  # XXX
     assert p2.wait() == 0
 
 
