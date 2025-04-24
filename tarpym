@@ -355,23 +355,25 @@ templates = {'payload.spec': TEMPLATE}
 def make_sig(hdr, tmpfile, psize=None):
     # find sigmd5 and payloadsize
     md5sum = hashlib.md5(hdr)
+    tmpfile.seek(0)
+    while True:
+        chunk = tmpfile.read(8192)
+        if not chunk:
+            break
+        md5sum.update(chunk)
+    actual_psize = tmpfile.tell()
     if psize is not None:
         payloadsize = psize
     else:
-        # XXX this is already compressed, we want the uncompressed size
+        payloadsize = actual_psize
+        # XXX this is the compressed size, we want the uncompressed size
         # RPMSIGTAG_PAYLOADSIZE = 1007,/*!< internal uncompressed payload size (32bit) in bytes. */
-        tmpfile.seek(0)
-        while True:
-            chunk = tmpfile.read(8192)
-            if not chunk:
-                break
-            md5sum.update(chunk)
-        payloadsize = tmpfile.tell()
 
     index = {
         "sha1header": hashlib.sha1(hdr).hexdigest(),
         "sha256header": hashlib.sha256(hdr).hexdigest(),
-        "size": [132669],  # XXX
+        "size": [len(hdr) + actual_psize],
+        # RPMSIGTAG_SIZE»·····= 1000,»/*!< internal Header+Payload size (32bit) in bytes. */
         "md5": {
             "value": encode_bytes(md5sum.digest()),
             "dtype": 7
