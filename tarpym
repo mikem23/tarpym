@@ -45,12 +45,13 @@ def explode_rpm(rpmfile, directory=None):
     h = rip_rpm_hdr(rpmfile)
     rh = RawHeader(h, decode=True, is_sig=False)
     header = rh.to_dict()
-    # skipping sig header for now
 
+    # parse signature header
     sighdr = rip_rpm_sighdr(rpmfile)
     rh = RawHeader(sighdr, decode=True, is_sig=True)
     sigheader = rh.to_dict()
 
+    # determine directory to write to
     if directory is None:
         # calculate destination dir
         nvr = '%(name)s-%(version)s-%(release)s' % header['index']
@@ -68,6 +69,7 @@ def explode_rpm(rpmfile, directory=None):
         dest = directory
     os.mkdir(dest)
 
+    # write headers
     fn = os.path.join(dest, 'header.json')
     with open(fn, 'wt') as fd:
         json.dump(header, fd, indent=4)
@@ -76,6 +78,7 @@ def explode_rpm(rpmfile, directory=None):
     with open(fn, 'wt') as fd:
         json.dump(sigheader, fd, indent=4)
 
+    # write payload
     if not args.no_payload:
         pdir = os.path.join(dest, 'payload')
         os.mkdir(pdir)
@@ -93,8 +96,9 @@ def create_rpm(directory, rpmfile=None):
     with open(fn, 'rt') as fd:
         header = json.load(fd, object_hook=OrderedDict)
 
+    # determine output file
     if rpmfile is None:
-        # generate filename from header info
+        # generate from header info
         nvr = '%(name)s-%(version)s-%(release)s' % header['index']
         arch = 'src' if header['index'].get('sourcepackage') else header['index']['arch']
         dest = f'{nvr}.{arch}.rpm'
@@ -110,6 +114,7 @@ def create_rpm(directory, rpmfile=None):
         # skip payload
         pass
     elif args.rpmbuild_payload:
+        # use rpmbuild
         p_info = build_payload(tmpfile, header, directory)
     else:
         # use cpio
@@ -123,21 +128,14 @@ def create_rpm(directory, rpmfile=None):
     if p_info:
         # rpmbuild case
         psize = p_info['sighdr']['index']['payloadsize'][0]
-        # import pdb; pdb.set_trace()
     sig = make_sig(hdr, tmpfile, psize=psize)
 
-    # alternate code that just copies old sig instead
-    # fn = os.path.join(directory, 'sig.json')
-    # with open(fn, 'rt') as fd:
-    #     sigheader = json.load(fd, object_hook=OrderedDict)
-    # sig = clone_sig(sigheader)
-
-    # bufsize = 819200
+    # finally, write out the rpm
     with open(dest, 'wb') as fd:
         fd.write(lead)
         fd.write(sig)
         fd.write(hdr)
-        tmpfile.seek(0)
+        tmpfile.seek(0)  # payload
         shutil.copyfileobj(tmpfile, fd)
 
 
@@ -186,9 +184,6 @@ def make_header(header):
 
 def write_payload(tmpfile, header, directory):
     # TODO handle "stripped down" cpio used for >4G
-    if args.no_payload:
-        # just leave it blank in this case
-        return
     pdir = f'{directory}/payload'
 
     # check that we have all the files
@@ -201,6 +196,7 @@ def write_payload(tmpfile, header, directory):
         flist.append(relpath)
 
     # write the list to a temporary file
+    # we'll pass this list to our cpio command
     tmplist = tempfile.TemporaryFile('w+b')
     for relpath in flist:
         # print(relpath)
@@ -222,7 +218,7 @@ def write_payload(tmpfile, header, directory):
 
     # XXX make this more flexible
     header['index']['payloadformat'] = 'cpio'
-    header['index']['payloadcompressor'] = 'gzip'
+    # header['index']['payloadcompressor'] = 'gzip'
     header['index']['payloadcompressor'] = 'zstd'
     header['index']['payloadflags'] = '19'
     if 'payloaddigestalt' in header['index']:
@@ -230,6 +226,7 @@ def write_payload(tmpfile, header, directory):
         del header['index']['payloaddigestalt']  # XXX
     header['index']['payloaddigestalgo'] = {'value': [8], 'dtype': 4}  # sha256
 
+    # calculate and record payload digest
     tmpfile.seek(0)
     csum = hashlib.sha256()
     while True:
@@ -250,15 +247,12 @@ def build_payload(tmpfile, header, directory):
     # make the file list
     flist = []
     dlist = []
-    d_used = {}
     for finfo in header['files']:
         if stat.S_ISREG(finfo['mode']):
-            d_used[finfo['dirname'].rstrip('/')] = 1
             flist.append('%(dirname)s%(basename)s' % finfo)
         elif stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
         # TODO others?
-    #dlist = [d for d in dlist if d not in d_used]
 
     # expand the spec template
     env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
@@ -268,6 +262,7 @@ def build_payload(tmpfile, header, directory):
     with open(spec, 'wt') as fp:
         fp.write(contents)
 
+    # run rpmbuild
     ppath = os.path.abspath(payload_dir)
     cmd = ['rpmbuild',
            '--define', f'_topdir {workdir}',
@@ -400,11 +395,6 @@ def make_sig(hdr, tmpfile, psize=None):
     return rh.header
 
 
-def clone_sig(sigheader):
-    rh = RawHeader(sigheader, is_sig=True)
-    return rh.header
-
-
 def error(msg):
     print(msg)
     sys.exit(1)
@@ -419,7 +409,9 @@ def explode_payload(fn, dest):
     p2 = subprocess.Popen(cmd2, cwd=dest, stdin=p1.stdout)
     p1.stdout.close()
     p2.communicate()
-    #assert p1.wait() == 0  # XXX
+    rv1 = p1.wait()
+    if rv1 != 0:
+        print(f'Warning: rpm2cpio returned code {rv1}')
     assert p2.wait() == 0
 
 
