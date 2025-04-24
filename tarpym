@@ -338,7 +338,12 @@ Also, this is a terrible hack.
 cp -ai %{payloaddir}/* %{buildroot}
 
 %files
-/*
+{%- for path in files %}
+{{ path }}
+{%- endfor %}
+{%- for path in dirs %}
+%dir {{ path }}
+{%- endfor %}
 
 %changelog
 * Wed Apr 23 2025 A Person <person at example.com> - 1.0-1
