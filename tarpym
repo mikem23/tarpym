@@ -28,7 +28,10 @@ def main():
     parser.add_argument('-f', '--filename', help='RPM filename')
     parser.add_argument('-d', '--directory', help='Directory of RPM contents')
     parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
-    parser.add_argument('--rpmbuild-payload', action='store_true', help='use rpmbuild to construct the payload')
+    parser.add_argument('--cpio-payload', action='store_const', dest='payload', const='cpio',
+                        default='rpmbuild', help='use cpio to construct the payload')
+    parser.add_argument('--rpmbuild-payload', action='store_const', dest='payload', const='rpmbuild',
+                        help='use rpmbuild to construct the payload')
     args = parser.parse_args()
     if args.extract:
         if not args.filename:
@@ -113,10 +116,10 @@ def create_rpm(directory, rpmfile=None):
     if args.no_payload:
         # skip payload
         pass
-    elif args.rpmbuild_payload:
+    elif args.payload == 'rpmbuild':
         # use rpmbuild
         p_info = build_payload(tmpfile, header, directory)
-    else:
+    elif args.payload == 'cpio':
         # use cpio
         write_payload(tmpfile, header, directory)
 
