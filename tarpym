@@ -188,14 +188,17 @@ def update_header_files(header, pdir):
     # check payload files against header
     changed = False
     newfiles = []
+    f_index = {}
     for finfo in header['files']:
         ipath = '%(dirname)s/%(basename)s' % finfo
-        lpath = f'{pdir}/{ipath}'
+        lpath = os.path.normpath(f'{pdir}/{ipath}')
         try:
             st = os.lstat(lpath)
         except FileNotFoundError:
             print(f'Dropping file {ipath}')
             continue
+
+        f_index[lpath] = finfo
 
         # size
         if st.st_size != finfo['size']:
@@ -215,6 +218,8 @@ def update_header_files(header, pdir):
                     break
                 csum.update(chunk)
 
+        # TODO handle symlinks
+
         digest = csum.hexdigest()
         if digest != finfo['md5']:
             # the primary header name is a misnomer
@@ -224,14 +229,62 @@ def update_header_files(header, pdir):
 
         newfiles.append(finfo)
 
-    header['files'] = newfiles
+    # find new files
+    for dirpath, dirnames, filenames in os.walk(pdir):
+        for fn in filenames:
+            lpath = os.path.normpath(f'{dirpath}/{fn}')
+            if lpath in f_index:
+                continue
+            print(f'New file: {lpath}')
+            finfo = new_file_entry(lpath, pdir)
+            newfiles.append(finfo)
+            changed = True
+        if not dirnames and not filenames:
+            lpath = os.path.normpath(dirpath)
+            if lpath in f_index:
+                continue
+            print(f'New empty directory: {lpath}')
+            finfo = new_file_entry(lpath, pdir)
+            newfiles.append(finfo)
+            changed = True
 
-    # TODO find new files in payload
+    header['files'] = newfiles
 
     # TODO also adjust header['index']['size']
 
     return changed
 
+
+def new_file_entry(lpath, pdir):
+    # FIXME incomplete
+    print('WARNING: support for new files is incomplete')
+    st = os.lstat(lpath)
+    dirpath = os.path.dirname(lpath)  # also pass in?
+    finfo = {
+        'basename': os.path.basename(lpath),
+        'dirname': os.path.relpath(dirpath, pdir),
+        'size': st.st_size,
+        # TODO lots more
+    }
+
+    # checksum
+    # XXX don't hardcode sha256
+    csum = hashlib.sha256()
+    with open(lpath, 'rb') as fp:
+        while True:
+            chunk = fp.read(8192)
+            if not chunk:
+                break
+            csum.update(chunk)
+
+    # TODO handle symlinks
+    # TODO handle directories
+
+    digest = csum.hexdigest()
+    finfo['md5'] = csum.hexdigest()
+    # the primary header name is a misnomer
+
+    return finfo
 
 
 def make_lead(header):
