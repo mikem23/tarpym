@@ -22,16 +22,19 @@ from koji.util import DataWalker
 
 def main():
     global args
-    parser = argparse.ArgumentParser(prog='tarpym', description='convert rpms to and from exploded contents')
-    parser.add_argument('-x', '--extract', action='store_true', help='Extract rpm file to directory')
-    parser.add_argument('-c', '--create', action='store_true', help='Create rpm file from directory')
+    parser = argparse.ArgumentParser(prog='tarpym',
+                                     description='convert rpms to and from exploded contents')
+    parser.add_argument('-x', '--extract', action='store_true',
+                        help='Extract rpm file to directory')
+    parser.add_argument('-c', '--create', action='store_true',
+                        help='Create rpm file from directory')
     parser.add_argument('-f', '--filename', help='RPM filename')
     parser.add_argument('-d', '--directory', help='Directory of RPM contents')
     parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
     parser.add_argument('--cpio-payload', action='store_const', dest='payload', const='cpio',
                         default='rpmbuild', help='use cpio to construct the payload')
-    parser.add_argument('--rpmbuild-payload', action='store_const', dest='payload', const='rpmbuild',
-                        help='use rpmbuild to construct the payload')
+    parser.add_argument('--rpmbuild-payload', action='store_const', dest='payload',
+                        const='rpmbuild', help='use rpmbuild to construct the payload')
     args = parser.parse_args()
     if args.extract:
         if not args.filename:
@@ -352,7 +355,6 @@ cp -ai %{payloaddir}/* %{buildroot}
 
 
 templates = {'payload.spec': TEMPLATE}
-
 
 
 def make_sig(hdr, tmpfile, psize=None):
@@ -884,41 +886,31 @@ class RawHeader(object):
 
     # headers to "zip"
     zipmap = (
-        ('changelog',
-         (
+        ('changelog', (
             ('changelogtime', 'time'),
             ('changelogname', 'name'),
             ('changelogtext', 'text'),
-         )
-        ),
-        ('provides',
-         (
+         )),
+        ('provides', (
             ('provides', 'value'),
             ('provideflags', 'flags'),
             ('provideversion', 'version'),
-         )
-        ),
-        ('requires',
-         (
+         )),
+        ('requires', (
             ('requires', 'value'),
             ('requireflags', 'flags'),
             ('requireversion', 'version'),
-         )
-        ),
-        ('obsoletes',
-         (
+         )),
+        ('obsoletes', (
             ('obsoletes', 'value'),
             ('obsoleteflags', 'flags'),
             ('obsoleteversion', 'version'),
-         )
-        ),
-        ('conflicts',
-         (
+         )),
+        ('conflicts', (
             ('conflicts', 'value'),
             ('conflictflags', 'flags'),
             ('conflictversion', 'version'),
-         )
-        ),
+         )),
     )
 
     def make_header(self, data):
@@ -951,7 +943,7 @@ class RawHeader(object):
             rpmtag = keymap[key]
             tagdata = index[key]
             if rpmtag in (62, 63):  # headersignatures, headerimmutable
-                print(f'Warning: ignoring region tag in input data')
+                print('Warning: ignoring region tag in input data')
                 continue
             order.append((rpmtag, key, tagdata))
         order.sort()
