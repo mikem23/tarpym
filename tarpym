@@ -28,6 +28,8 @@ def main():
                         help='Extract rpm file to directory')
     parser.add_argument('-c', '--create', action='store_true',
                         help='Create rpm file from directory')
+    parser.add_argument('-u', '--update', action='store_true',
+                        help='Update extracted header data from payload contents')
     parser.add_argument('-f', '--filename', help='RPM filename')
     parser.add_argument('-d', '--directory', help='Directory of RPM contents')
     parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
@@ -40,10 +42,16 @@ def main():
         if not args.filename:
             parser.error('Please provide a filename for extraction')
         explode_rpm(args.filename, args.directory)
-    else:
+    elif args.create:
         if not args.directory:
             parser.error('Please provide a directory of rpm contents')
         create_rpm(args.directory, args.filename)
+    elif args.update:
+        if not args.directory:
+            parser.error('Please provide a directory of rpm contents')
+        update_header(args.directory)
+    else:
+        parser.error('No action specified')
 
 
 def explode_rpm(rpmfile, directory=None):
@@ -143,6 +151,87 @@ def create_rpm(directory, rpmfile=None):
         fd.write(hdr)
         tmpfile.seek(0)  # payload
         shutil.copyfileobj(tmpfile, fd)
+
+
+def update_header(directory):
+    if not os.path.isdir(directory):
+        error(f'No such directory: {directory}')
+    pdir = os.path.join(directory, 'payload')
+    if not os.path.isdir(pdir):
+        error(f'Missing payload directory: {pdir}')
+
+    # load header metadata
+    header_fn = os.path.join(directory, 'header.json')
+    with open(header_fn, 'rt') as fd:
+        header = json.load(fd, object_hook=OrderedDict)
+
+    changed = update_header_files(header, pdir)  # modifies header
+
+    if not changed:
+        print('No file changes detected')
+
+    # backup
+    for i in range(100):
+        backup = f'{header_fn}.save.{i}'
+        if not os.path.exists(backup):
+            shutil.copyfile(header_fn, backup)
+            break
+    else:
+        error('backup limit exhausted')
+
+    # write new header
+    with open(header_fn, 'wt') as fd:
+        json.dump(header, fd, indent=4)
+
+
+def update_header_files(header, pdir):
+    # check payload files against header
+    changed = False
+    newfiles = []
+    for finfo in header['files']:
+        ipath = '%(dirname)s/%(basename)s' % finfo
+        lpath = f'{pdir}/{ipath}'
+        try:
+            st = os.lstat(lpath)
+        except FileNotFoundError:
+            print(f'Dropping file {ipath}')
+            continue
+
+        # size
+        if st.st_size != finfo['size']:
+            print(f'Adjust size for {ipath} to {st.st_size}')
+            changed = True
+            finfo['size'] = st.st_size
+
+        # TODO abbreviated check option
+
+        # checksum
+        # XXX don't hardcode sha256
+        csum = hashlib.sha256()
+        with open(lpath, 'rb') as fp:
+            while True:
+                chunk = fp.read(8192)
+                if not chunk:
+                    break
+                csum.update(chunk)
+
+        digest = csum.hexdigest()
+        if digest != finfo['md5']:
+            # the primary header name is a misnomer
+            print(f'Adjust checksum for {ipath} to {digest}')
+            changed = True
+            finfo['md5'] = digest
+
+        newfiles.append(finfo)
+
+    header['files'] = newfiles
+
+    # TODO find new files in payload
+
+    # TODO also adjust header['index']['size']
+
+    return changed
+
 
 
 def make_lead(header):
