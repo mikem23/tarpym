@@ -132,16 +132,20 @@ def create_rpm(directory, rpmfile=None):
         p_info = build_payload(tmpfile, header, directory)
     elif args.payload == 'cpio':
         # use cpio
-        write_payload(tmpfile, header, directory)
+        p_info = write_payload(tmpfile, header, directory)
 
     lead = make_lead(header)
     hdr = make_header(header)
 
     # make signature header
     psize = None
-    if p_info:
+    if 'size' in p_info:
+        # cpio case
+        psize = p_info['size']
+    elif 'sighdr' in p_info:
         # rpmbuild case
         psize = p_info['sighdr']['index']['payloadsize'][0]
+    print(f"Payload size {psize}")
     sig = make_sig(hdr, tmpfile, psize=psize)
 
     # finally, write out the rpm
@@ -343,26 +347,34 @@ def write_payload(tmpfile, header, directory):
             raise Exception(f'Missing payload file: {fn}')
         flist.append(relpath)
 
-    # write the list to a temporary file
-    # we'll pass this list to our cpio command
-    tmplist = tempfile.TemporaryFile('w+b')
-    for relpath in flist:
-        # print(relpath)
-        tmplist.write(relpath.encode(errors='surrogatepass'))
-        tmplist.write(b'\0')  # null separated
+    workdir = tempfile.mkdtemp()
+    try:
+        # write the file list to a temporary file
+        # we'll pass this list to our cpio command
+        tmplist = f'{workdir}/flist'
+        with open(tmplist, 'wt') as fp:
+            for relpath in flist:
+                fp.write(relpath)
+                fp.write('\0')  # null separated
 
-    tmplist.seek(0)
+        # generate compressed payload
+        cmd1 = ['cpio', '-o', '--null', '-H', 'crc', '--no-absolute-filenames',
+                '--ignore-devno', '--device-independent', '-v']
+        cmd2 = ['zstd', '-19']
+        raw = f'{workdir}/raw_payload'
+        with open(tmplist, 'rb') as inp:
+            with open(raw, 'wb') as outp:
+                p1 = subprocess.Popen(cmd1, cwd=pdir, stdin=inp, stdout=outp)
+                assert p1.wait() == 0
+        with open(raw, 'rb') as inp:
+            p2 = subprocess.Popen(cmd2, stdin=inp, stdout=tmpfile)
+            assert p2.wait() == 0
 
-    cmd1 = ['cpio', '-o', '--null', '-H', 'crc', '--no-absolute-filenames',
-            '--ignore-devno', '--device-independent', '-v']
-    cmd2 = ['zstd', '-19']
+        st = os.stat(raw)
+        psize = st.st_size
 
-    p1 = subprocess.Popen(cmd1, cwd=pdir, stdin=tmplist, stdout=subprocess.PIPE)
-    p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=tmpfile)
-    p1.stdout.close()
-    p2.communicate()
-    assert p1.wait() == 0
-    assert p2.wait() == 0
+    finally:
+        shutil.rmtree(workdir)
 
     # XXX make this more flexible
     header['index']['payloadformat'] = 'cpio'
@@ -383,6 +395,8 @@ def write_payload(tmpfile, header, directory):
             break
         csum.update(chunk)
     header['index']['payloaddigest'] = {'value': [csum.hexdigest()], 'dtype': 8}
+
+    return {'size': psize}
 
 
 def build_payload(tmpfile, header, directory):
