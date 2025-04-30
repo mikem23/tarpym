@@ -511,18 +511,17 @@ cp -ai "%{payloaddir}/{{ pdir }}" %{buildroot}
 
 %files
 {%- for path in files %}
-{{ path }}
+"{{ path }}"
 {%- endfor %}
 {%- for path in dirs %}
-%dir {{ path }}
+%dir "{{ path }}"
 {%- endfor %}
 
 %changelog
 * Wed Apr 23 2025 A Person <person at example.com> - 1.0-1
 - rpm is happier with a changelog
 '''
-# FIXME the cp command could theoretically miss dotfiles
-# (granted it's not particularly sane to package dotfiles under root)
+# FIXME properly escape quoted paths in spec template
 
 
 templates = {'payload.spec': TEMPLATE}
