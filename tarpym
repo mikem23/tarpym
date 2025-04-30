@@ -196,6 +196,7 @@ def update_header_files(header, pdir):
     for finfo in header['files']:
         ipath = '%(dirname)s/%(basename)s' % finfo
         lpath = os.path.normpath(f'{pdir}/{ipath}')
+        # TODO handle %ghost files
         try:
             st = os.lstat(lpath)
         except FileNotFoundError:
@@ -411,6 +412,10 @@ def build_payload(tmpfile, header, directory):
     flist = []
     dlist = []
     for finfo in header.get('files', []):
+        # %ghost files are not in the payload
+        if finfo['flags'] & rpm.RPMFILE_GHOST:
+            # TODO we should pass it through as %ghost in case rpm changes
+            continue
         if stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
         #elif stat.S_ISREG(finfo['mode']):
