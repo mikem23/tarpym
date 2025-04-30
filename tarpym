@@ -490,9 +490,11 @@ Release:        1
 Summary:        fake spec to get a payload
 License:        LGPL
 BuildArch:      noarch
+AutoReqProv:    no
 
 # we don't want any modifications to our files
 %define __os_install_post %{nil}
+%define __arch_install_post %{nil}
 # we're always noarch
 %define _binaries_in_noarch_packages_terminate_build 0
 
