@@ -410,11 +410,12 @@ def build_payload(tmpfile, header, directory):
     flist = []
     dlist = []
     for finfo in header['files']:
-        if stat.S_ISREG(finfo['mode']):
-            flist.append('%(dirname)s%(basename)s' % finfo)
-        elif stat.S_ISDIR(finfo['mode']):
+        if stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
-        # TODO others?
+        #elif stat.S_ISREG(finfo['mode']):
+        else:
+            flist.append('%(dirname)s%(basename)s' % finfo)
+        # TODO do I need to distinguish more types?
 
     # expand the spec template
     env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
@@ -437,6 +438,7 @@ def build_payload(tmpfile, header, directory):
     p = subprocess.run(cmd, capture_output=True)
     if p.returncode != 0:
         sys.stderr.write(p.stderr.decode('utf8'))
+        print(f'workdir={workdir}')
         error('failed to build payload')
     p.check_returncode()
 
@@ -485,6 +487,8 @@ BuildArch:      noarch
 
 # we don't want any modifications to our files
 %define __os_install_post %{nil}
+# we're always noarch
+%define _binaries_in_noarch_packages_terminate_build 0
 
 %description
 We're only building an rpm to extract the payload, so only the files matter
