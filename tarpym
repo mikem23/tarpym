@@ -402,6 +402,7 @@ def write_payload(tmpfile, header, directory):
 def build_payload(tmpfile, header, directory):
 
     payload_dir = f'{directory}/payload'
+    pdirs = os.listdir(payload_dir)
 
     # define a tempdir for rpmbuild
     workdir = tempfile.mkdtemp()
@@ -409,7 +410,7 @@ def build_payload(tmpfile, header, directory):
     # make the file list
     flist = []
     dlist = []
-    for finfo in header['files']:
+    for finfo in header.get('files', []):
         if stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
         #elif stat.S_ISREG(finfo['mode']):
@@ -420,7 +421,7 @@ def build_payload(tmpfile, header, directory):
     # expand the spec template
     env = jinja2.Environment(loader=jinja2.DictLoader(templates), autoescape=False)
     template = env.get_template('payload.spec')
-    contents = template.render(files=flist, dirs=dlist)
+    contents = template.render(files=flist, dirs=dlist, pdirs=pdirs)
     spec = f'{workdir}/payload.spec'
     with open(spec, 'wt') as fp:
         fp.write(contents)
@@ -496,7 +497,10 @@ Also, this is a terrible hack.
 
 %install
 # payloaddir macro is passed in, so we just copy the files
-cp -ai %{payloaddir}/* %{buildroot}
+{# note mix of rpm and jinja macros #}
+{%- for pdir in pdirs %}
+cp -ai "%{payloaddir}/{{ pdir }}" %{buildroot}
+{%- endfor %}
 
 %files
 {%- for path in files %}
