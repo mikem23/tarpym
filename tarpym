@@ -588,6 +588,11 @@ def explode_payload(fn, dest):
     if rv1 != 0:
         print(f'Warning: rpm2cpio returned code {rv1}')
     assert p2.wait() == 0
+    # fix modes so we can read/write
+    cmd3 = ['chmod', '-R', 'u+rw', dest]
+    p3 = subprocess.Popen(cmd3)
+    assert p3.wait() == 0
+
 
 
 # Constants #
