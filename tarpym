@@ -1115,7 +1115,11 @@ class RawHeader(object):
         # figure out storage order
         order = []
         for key in index:
-            rpmtag = keymap[key]
+            if key.startswith('RPM Tag '):
+                # TODO make this smarter
+                rpmtag = int(key[8:])
+            else:
+                rpmtag = keymap[key]
             tagdata = index[key]
             if rpmtag in (62, 63):  # headersignatures, headerimmutable
                 print('Warning: ignoring region tag in input data')
