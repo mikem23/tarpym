@@ -144,7 +144,12 @@ def create_rpm(directory, rpmfile=None):
         psize = p_info['size']
     elif 'sighdr' in p_info:
         # rpmbuild case
-        psize = p_info['sighdr']['index']['payloadsize'][0]
+        _idx = p_info['sighdr']['index']
+        if 'longarchivesize' in _idx:
+            psize = _idx['longarchivesize']['value'][0]
+            # TODO clean up access
+        else:
+            psize = p_info['sighdr']['index']['payloadsize'][0]
     print(f"Payload size {psize}")
     sig = make_sig(hdr, tmpfile, psize=psize)
 
