@@ -577,7 +577,27 @@ def error(msg):
 
 def explode_payload(fn, dest):
     """Write files from rpm payload to destination dir"""
-    # TODO handle "stripped down" cpio used for >4G
+    r2a = shutil.which('rpm2archive')
+    # TODO handle py < 3.3 case
+    if not r2a:
+        return explode_payload_cpio(fn, dest)
+    cmd1 = [r2a, fn]
+    cmd2 = ['tar', '-xz']
+    p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
+    p2 = subprocess.Popen(cmd2, cwd=dest, stdin=p1.stdout)
+    p1.stdout.close()
+    p2.communicate()
+    rv1 = p1.wait()
+    if rv1 != 0:
+        print(f'Warning: rpm2archive returned code {rv1}')
+    assert p2.wait() == 0
+    # fix modes so we can read/write
+    cmd3 = ['chmod', '-R', 'u+rw', dest]
+    p3 = subprocess.Popen(cmd3)
+    assert p3.wait() == 0
+
+
+def explode_payload_cpio(fn, dest):
     cmd1 = ['rpm2cpio', fn]
     cmd2 = ['cpio', '-iud']
     p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
