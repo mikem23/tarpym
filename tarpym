@@ -547,13 +547,11 @@ def make_sig(hdr, tmpfile, psize=None):
     index = {
         "sha1header": hashlib.sha1(hdr).hexdigest(),
         "sha256header": hashlib.sha256(hdr).hexdigest(),
-        "size": [len(hdr) + actual_psize],
         # RPMSIGTAG_SIZE»·····= 1000,»/*!< internal Header+Payload size (32bit) in bytes. */
         "md5": {
             "value": encode_bytes(md5sum.digest()),
             "dtype": 7
         },
-        "payloadsize": [payloadsize],
         "reservedspace": {
             # default __gpg_reserved_space (4096) plus 32
             # see rpmGenerateSignature() in rpm source
@@ -561,6 +559,14 @@ def make_sig(hdr, tmpfile, psize=None):
             "dtype": 7
         },
     }
+
+    if payloadsize > 4 * 1024 ** 3:
+        index['longarchivesize'] = {'value': [payloadsize], 'dtype': 5}
+        index['longsigsize'] = {'value': [len(hdr) + actual_psize], 'dtype': 5}
+        # TODO make this less awkward
+    else:
+        index['payloadsize'] = [payloadsize]
+        index['size'] = [len(hdr) + actual_psize]
 
     # RawHeader will add region tag for us
 
