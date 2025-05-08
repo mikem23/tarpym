@@ -37,6 +37,8 @@ def main():
                         default='rpmbuild', help='use cpio to construct the payload')
     parser.add_argument('--rpmbuild-payload', action='store_const', dest='payload',
                         const='rpmbuild', help='use rpmbuild to construct the payload')
+    parser.add_argument('--cpio-extract', action='store_const', dest='extract', const='cpio',
+                        default=None, help='use cpio to extract the payload')
     args = parser.parse_args()
     if args.extract:
         if not args.filename:
@@ -161,6 +163,8 @@ def create_rpm(directory, rpmfile=None):
         tmpfile.seek(0)  # payload
         shutil.copyfileobj(tmpfile, fd)
 
+    print(f"Wrote: {dest}")
+
 
 def update_header(directory):
     if not os.path.isdir(directory):
@@ -209,6 +213,16 @@ def update_header_files(header, pdir):
             continue
 
         f_index[lpath] = finfo
+
+        if stat.S_ISDIR(st.st_mode):
+            # TODO handle directories
+            newfiles.append(finfo)
+            continue
+
+        if stat.S_ISLNK(st.st_mode):
+            # TODO handle symlinks
+            newfiles.append(finfo)
+            continue
 
         # size
         if st.st_size != finfo['size']:
@@ -590,7 +604,7 @@ def explode_payload(fn, dest):
     """Write files from rpm payload to destination dir"""
     r2a = shutil.which('rpm2archive')
     # TODO handle py < 3.3 case
-    if not r2a:
+    if not r2a or args.extract == 'cpio':
         return explode_payload_cpio(fn, dest)
     cmd1 = [r2a, fn]
     cmd2 = ['tar', '-xz']
