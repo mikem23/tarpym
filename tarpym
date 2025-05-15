@@ -961,6 +961,24 @@ class RawHeader(object):
                 del idx['dirnames']
                 del idx['dirindexes']
 
+            # defererence file classes
+            # Fileclass           | 1141 | int32 array  | Index into Classdict
+            classes = idx.get('classdict')
+            if isinstance(classes, dict):
+                classes = classes['value']
+                # TODO dtypes?
+            if classes:
+                for finfo in files:
+                    if 'class' in finfo:
+                        cls_idx = finfo['class']
+                        if cls_idx >= len(classes):
+                            raise ValueError(f'File class index out of bounds: {cls_idx}')
+                        finfo['class'] = classes[cls_idx]
+                    else:
+                        # TODO should we be stricter here?
+                        print(f'Warning: no class info for file {finfo}')
+                del idx['classdict']
+
         # the other groupings are simpler
         for group, gmap in self.zipmap:
             glist = None
