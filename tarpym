@@ -1132,6 +1132,7 @@ class RawHeader(object):
         'conflicts': 8,
         'conflictflags': 4,
         'conflictversion': 8,
+        'classdict': 8,
     }
 
     # headers to "zip"
