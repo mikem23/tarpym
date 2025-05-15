@@ -1039,6 +1039,18 @@ class RawHeader(object):
             raise ValueError('Found duplicate files data')
 
         fileheaders = {}
+
+        classmap = OrderedDict()
+        for finfo in data['files']:
+            # first pass gathers the file classes in order
+            if 'class' in finfo and isinstance(finfo['class'], str):
+                if finfo['class'] not in classmap:
+                    classmap[finfo['class']] = len(classmap)  # so, reverse zero index
+        for finfo in data['files']:
+            if 'class' in finfo and finfo['class'] in classmap:
+                finfo['class'] = classmap[finfo['class']]
+        fileheaders['classdict'] = list(classmap.keys())
+
         basenames = fileheaders['basenames'] = []
         dirmap = OrderedDict()
         for finfo in data['files']:
