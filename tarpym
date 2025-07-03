@@ -1093,10 +1093,12 @@ class RawHeader(object):
         ('fileclass', 'class'),
         ('filedependsx', 'dependsx'),
         ('filedependsn', 'dependsn'),
+        ('longfilesizes', 'longsize'),
     ]
 
     typemap = {
         'filesizes': 4,
+        'longfilesizes': 5,
         'filemodes': 3,
         'filerdevs': 3,
         'filemtimes': 4,
