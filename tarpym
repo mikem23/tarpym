@@ -143,7 +143,16 @@ def create_rpm(directory, rpmfile=None):
         # use cpio
         p_info = write_payload(tmpfile, header, directory)
 
-    lead = make_lead(header)
+    # make lead
+    lead_fn = os.path.join(directory, 'lead.json')
+    lead_data = None
+    if os.path.exists(lead_fn):
+        with open(lead_fn, 'rt') as fd:
+            lead_data = json.load(fd, object_hook=OrderedDict)
+            # actually order doesn't really matter going this way, but shouldn't hurt
+    lead = make_lead(header, lead_data)
+
+    # make header
     hdr = make_header(header)
 
     # make signature header
@@ -318,40 +327,110 @@ def new_file_entry(lpath, pdir):
     return finfo
 
 
-def make_lead(header):
-    # See Maximum RPM, Appendix A, RPM File Format
-    # https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
-    # "Package files are written to disk in network byte order
+# Data for rpmlead struct
+# See Maximum RPM, Appendix A, RPM File Format
+# https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
+# "Package files are written to disk in network byte order
+LEAD_MAP = (
+    ('magic', '4s'),            # unsigned char magic[4];
+    ('major', 'B'),
+    ('minor', 'B'),             # unsigned char major, minor;
+    ('type', 'h'),              # short type;
+    ('archnum', 'h'),           # short archnum;
+    ('name', '66s'),            # char name[66];
+    ('osnum', 'h'),             # short osnum;
+    ('signature_type', 'h'),    # short signature_type;
+    ('reserved', '16s')         # char reserved[16];
+)
+LEAD_FMT = '!' + ''.join([s for (k, s) in LEAD_MAP])  # network byte order
 
-    # struct rpmlead {
-    #     unsigned char magic[4];        edab eedb
-    #     unsigned char major, minor;
-    #     short type;                    binary 0000, src 0001
-    #     short archnum;
-    #     char name[66];                 nvr padded/truncated
-    #     short osnum;                   0001 = linux
-    #     short signature_type;
-    #     char reserved[16];             0
-    # } ;
+
+def parse_lead(src):
+    """Parse the lead out of an rpm"""
+    fmt = LEAD_FMT
+    lead_size = 96
+    assert struct.calcsize(fmt) == lead_size
+    with open(src, 'rb') as fp:
+        lead_bin = fp.read(lead_size)
+    lead = OrderedDict()
+    data = struct.unpack(fmt, lead_bin)
+    for (key, _s), value in zip(LEAD_MAP, data):
+        lead[key] = value
+
+    # sanity checks
+    if lead['magic'] != RPM_LEAD_MAGIC:
+        raise ValueError("Invalid rpm lead: bad magic: %(magic)r" % lead)
+    if lead['type'] not in (0, 1):
+        print('Warning: unknown type in lead %(type)r' % lead)
+    if lead['reserved'] != b'\0' * 16:
+        print('Warning: unexpected reserved content in lead %(reserved)r' % lead)
+
+    # convert values to be json friendly
+    lead['name'] = lead['name'].rstrip(b'\0').decode('utf8', errors='surrogateescape')
+    lead['magic'] = base64.b64encode(lead['magic']).decode('ascii')
+    lead['reserved'] = base64.b64encode(lead['reserved']).decode('ascii')
+
+    return lead
+
+
+def encode_lead(lead):
+    """Encode any decoded data in lead dict"""
+    # see the corresponding conversions in parse_lead
+    lead = lead.copy()
+    if 'name' in lead:
+        name = lead['name']
+        if isinstance(name, str):
+            lead['name'] = name.encode(errors='surrogatepass')
+    for key in 'magic', 'reserved':
+        if key in lead:
+            value = lead[key]
+            if isinstance(value, str):
+                lead[key] = base64.b64decode(value)
+    return lead
+
+
+def make_lead(header, data=None):
+    """Generate a lead blob"""
+    if data is None:
+        data = {}
+    else:
+        data = encode_lead(data)
 
     magic = b'\xED\xAB\xEE\xDB'
-    major = b'\x03'
-    minor = b'\x00'
-    # "Versions of RPM later than 2.1 create version 3.0 package files
-    _type = 1 if header['index'].get('sourcepackage') else 0
-    _type = struct.pack('!h', _type)
-    archnum = struct.pack('!h', 255)  # does this matter?
-    name = '%(name)s-%(version)s-%(release)s' % header['index']
-    name = name.encode(errors='surrogatepass')
-    name = name[:66]
-    pad = b'\x00' * (66 - len(name))
-    name = name + pad
-    osnum = struct.pack('!h', 1)
-    sigtype = 5
-    sigtype = struct.pack('!h', 5)
-    reserved = b'\x00' * 16
+    if 'magic' in data and data['magic'] != magic:
+        print('Warning: invalid lead magic specified: %(magic)r' % data)
+        # but do what the user says
 
-    lead = magic + major + minor + _type + archnum + name + osnum + sigtype + reserved
+    # "Versions of RPM later than 2.1 create version 3.0 package files
+    data.setdefault('major', 3)
+    data.setdefault('minor', 0)
+
+    if data.get('type') is None:
+        # binary 0000, src 0001
+        data['type'] = 1 if header['index'].get('sourcepackage') else 0
+
+    data.setdefault('archnum', 255)
+
+    # handle the name
+    name = data.get('name')
+    if name is None:
+        # generate from header
+        name = '%(name)s-%(version)s-%(release)s' % header['index']
+        name = name.encode(errors='surrogatepass')
+        name = name[:66]
+    elif len(name) > 66:
+        print('Warning: lead name is too long. Truncating')
+        name = name[:66]
+    # pad regardless
+    pad = b'\x00' * (66 - len(name))
+    data['name'] = name + pad
+
+    data.setdefault('osnum', 1)     # 0001 = linux
+    data.setdefault('sigtype', 5)
+    data.setdefault('reserved', b'\x00' * 16)
+
+    values = [data[k] for (k, s) in LEAD_MAP]
+    lead = struct.pack(LEAD_FMT, *values)
     assert len(lead) == 96
     return lead
 
@@ -1405,50 +1484,6 @@ def encode_bytes(value):
 def encode_bytes_recurse(value):
     walker = DataWalker(value, encode_bytes)
     return walker.walk()
-
-
-def parse_lead(src):
-    """Parse the lead out of an rpm"""
-    # The lead is a fixed sized section (96 bytes) that is mostly obsolete
-    # See Maximum RPM, Appendix A, RPM File Format
-    # https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
-
-    # map based on rpmlead struct
-    s_map = (
-        ('magic', '4s'),            # unsigned char magic[4];
-        ('major', 'B'),
-        ('minor', 'B'),             # unsigned char major, minor;
-        ('type', 'h'),              # short type;
-        ('archnum', 'h'),           # short archnum;
-        ('name', '66s'),            # char name[66];
-        ('osnum', 'h'),             # short osnum;
-        ('signature_type', 'h'),    # short signature_type;
-        ('reserved', '16s')         # char reserved[16];
-    )
-    fmt = '!' + ''.join([s for (k, s) in s_map])  # network byte order)
-    lead_size = 96
-    assert struct.calcsize(fmt) == lead_size
-    with open(src, 'rb') as fp:
-        lead_bin = fp.read(lead_size)
-    lead = OrderedDict()
-    data = struct.unpack(fmt, lead_bin)
-    for (key, _s), value in zip(s_map, data):
-        lead[key] = value
-
-    # sanity checks
-    if lead['magic'] != RPM_LEAD_MAGIC:
-        raise ValueError("Invalid rpm lead: bad magic: %(magic)r" % lead)
-    if lead['type'] not in (0, 1):
-        print('Warning: unknown type in lead %(type)r' % lead)
-    if lead['reserved'] != b'\0' * 16:
-        print('Warning: unexpected reserved content in lead %(reserved)r' % lead)
-
-    # convert values to be json friendly
-    lead['name'] = lead['name'].rstrip(b'\0').decode('utf8', errors='surrogateescape')
-    lead['magic'] = base64.b64encode(lead['magic']).decode('ascii')
-    lead['reserved'] = base64.b64encode(lead['reserved']).decode('ascii')
-
-    return lead
 
 
 def rip_rpm_sighdr(src):
