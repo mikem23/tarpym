@@ -57,6 +57,9 @@ def main():
 
 
 def explode_rpm(rpmfile, directory=None):
+    # parse lead
+    lead = parse_lead(rpmfile)
+
     # parse header
     h = rip_rpm_hdr(rpmfile)
     rh = RawHeader(h, decode=True, is_sig=False)
@@ -85,7 +88,11 @@ def explode_rpm(rpmfile, directory=None):
         dest = directory
     os.mkdir(dest)
 
-    # write headers
+    # write lead + headers
+    fn = os.path.join(dest, 'lead.json')
+    with open(fn, 'wt') as fd:
+        json.dump(lead, fd, indent=4)
+
     fn = os.path.join(dest, 'header.json')
     with open(fn, 'wt') as fd:
         json.dump(header, fd, indent=4)
@@ -642,6 +649,7 @@ def explode_payload_cpio(fn, dest):
 
 # Constants #
 
+RPM_LEAD_MAGIC = six.b('\xed\xab\xee\xdb')
 RPM_HEADER_MAGIC = six.b('\x8e\xad\xe8')
 RPM_TAG_HEADERSIGNATURES = 62
 RPM_TAG_FILEDIGESTALGO = 5011
@@ -1397,6 +1405,50 @@ def encode_bytes(value):
 def encode_bytes_recurse(value):
     walker = DataWalker(value, encode_bytes)
     return walker.walk()
+
+
+def parse_lead(src):
+    """Parse the lead out of an rpm"""
+    # The lead is a fixed sized section (96 bytes) that is mostly obsolete
+    # See Maximum RPM, Appendix A, RPM File Format
+    # https://ftp.osuosl.org/pub/rpm/max-rpm/s1-rpm-file-format-rpm-file-format.html
+
+    # map based on rpmlead struct
+    s_map = (
+        ('magic', '4s'),            # unsigned char magic[4];
+        ('major', 'B'),
+        ('minor', 'B'),             # unsigned char major, minor;
+        ('type', 'h'),              # short type;
+        ('archnum', 'h'),           # short archnum;
+        ('name', '66s'),            # char name[66];
+        ('osnum', 'h'),             # short osnum;
+        ('signature_type', 'h'),    # short signature_type;
+        ('reserved', '16s')         # char reserved[16];
+    )
+    fmt = '!' + ''.join([s for (k, s) in s_map])  # network byte order)
+    lead_size = 96
+    assert struct.calcsize(fmt) == lead_size
+    with open(src, 'rb') as fp:
+        lead_bin = fp.read(lead_size)
+    lead = OrderedDict()
+    data = struct.unpack(fmt, lead_bin)
+    for (key, _s), value in zip(s_map, data):
+        lead[key] = value
+
+    # sanity checks
+    if lead['magic'] != RPM_LEAD_MAGIC:
+        raise ValueError("Invalid rpm lead: bad magic: %(magic)r" % lead)
+    if lead['type'] not in (0, 1):
+        print('Warning: unknown type in lead %(type)r' % lead)
+    if lead['reserved'] != b'\0' * 16:
+        print('Warning: unexpected reserved content in lead %(reserved)r' % lead)
+
+    # convert values to be json friendly
+    lead['name'] = lead['name'].rstrip(b'\0').decode('utf8', errors='surrogateescape')
+    lead['magic'] = base64.b64encode(lead['magic']).decode('ascii')
+    lead['reserved'] = base64.b64encode(lead['reserved']).decode('ascii')
+
+    return lead
 
 
 def rip_rpm_sighdr(src):
