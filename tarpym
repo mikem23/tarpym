@@ -37,6 +37,8 @@ def main():
                         default='rpmbuild', help='use cpio to construct the payload')
     parser.add_argument('--rpmbuild-payload', action='store_const', dest='payload',
                         const='rpmbuild', help='use rpmbuild to construct the payload')
+    parser.add_argument('--raw-payload', action='store_true',
+                        help='write payload.bin instead of expanding files')
     parser.add_argument('--cpio-extract', action='store_const', dest='extract', const='cpio',
                         default=None, help='use cpio to extract the payload')
     args = parser.parse_args()
@@ -103,9 +105,13 @@ def explode_rpm(rpmfile, directory=None):
 
     # write payload
     if not args.no_payload:
-        pdir = os.path.join(dest, 'payload')
-        os.mkdir(pdir)
-        explode_payload(rpmfile, pdir)
+        if args.raw_payload:
+            fn = os.path.join(dest, 'payload.bin')
+            rip_payload(rpmfile, fn)
+        else:
+            pdir = os.path.join(dest, 'payload')
+            os.mkdir(pdir)
+            explode_payload(rpmfile, pdir)
 
     print(f'Expoded {rpmfile} to {dest}')
 
@@ -684,6 +690,24 @@ def make_sig(hdr, tmpfile, psize=None):
 def error(msg):
     print(msg)
     sys.exit(1)
+
+
+def rip_payload(rpmfile, fn):
+    """Simply write payload blob to a file"""
+    # TODO check payload size against header
+    # TODO avoid rescanning the headers
+    sig_start, sigsize = find_rpm_sighdr(rpmfile)
+    ofs = sig_start + sigsize
+    hdrsize = rpm_hdr_size(rpmfile, ofs)
+    with open(rpmfile, 'rb') as inf:
+        # skip the headers
+        inf.seek(ofs + hdrsize)
+        with open(fn, 'wb') as outf:
+            while True:
+                chunk = inf.read(81920)
+                if not chunk:
+                    break
+                outf.write(chunk)
 
 
 def explode_payload(fn, dest):
