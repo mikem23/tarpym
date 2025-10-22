@@ -142,6 +142,10 @@ def create_rpm(directory, rpmfile=None):
     if args.no_payload:
         # skip payload
         pass
+    elif args.raw_payload:
+        # TODO detect conflicting args
+        p_info = dup_payload(tmpfile, header, directory)
+        # TODO fetch p_info from old sighdr
     elif args.payload == 'rpmbuild':
         # use rpmbuild
         p_info = build_payload(tmpfile, header, directory)
@@ -174,6 +178,9 @@ def create_rpm(directory, rpmfile=None):
             # TODO clean up access
         else:
             psize = p_info['sighdr']['index']['payloadsize'][0]
+    else:
+        ...
+        # TODO raw case
     print(f"Payload size {psize}")
     sig = make_sig(hdr, tmpfile, psize=psize)
 
@@ -444,6 +451,23 @@ def make_lead(header, data=None):
 def make_header(header):
     rh = RawHeader(header, is_sig=False)
     return rh.header
+
+
+def dup_payload(tmpfile, header, directory):
+    pfile = f'{directory}/payload.bin'
+    if not os.path.exists(pfile):
+        raise Exception(f'Missing payload file: {pfile}')
+
+    print(f'Re-using payload from {pfile}')
+
+    with open(pfile, 'rb') as inp:
+        inp.seek(start)
+        # TODO verify checksum
+        shutil.copyfileobj(inp, tmpfile)
+
+    # we don't touch the header since we have not changed the payload
+
+    return {}  # XXX?
 
 
 def write_payload(tmpfile, header, directory):
