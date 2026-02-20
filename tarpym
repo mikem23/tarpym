@@ -1069,9 +1069,11 @@ class RawHeader(object):
                     previous = previous['value']
                     # TODO handle dtype
                 if len(previous) != len(files):
-                    # XXX should never happen
+                    # this should not happen, but rpms can be incorrectly constructed
+                    # example case: https://github.com/rpm-software-management/rpm/issues/4013
                     print(f'File header length mismatch for {key} '
                           f'{len(previous)} != {len(files)}')
+                    # we'll skip this key, leaving it ungrouped
                     continue
                 for i, finfo in enumerate(files):
                     finfo[subkey] = previous[i]
