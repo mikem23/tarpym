@@ -32,6 +32,7 @@ def main():
                         help='Update extracted header data from payload contents')
     parser.add_argument('-f', '--filename', help='RPM filename')
     parser.add_argument('-d', '--directory', help='Directory of RPM contents')
+    parser.add_argument('--no-grouping', action='store_true', help='do not group headers')
     parser.add_argument('--no-payload', action='store_true', help='skip payload, for debugging')
     parser.add_argument('--cpio-payload', action='store_const', dest='payload', const='cpio',
                         default='rpmbuild', help='use cpio to construct the payload')
@@ -1042,7 +1043,8 @@ class RawHeader(object):
             idx[key] = value
 
         # group file data for convenience and readability
-        self._group_headers(result)
+        if not args.no_grouping:
+            self._group_headers(result)
 
         # fix encoding
         result = encode_bytes_recurse(result)
@@ -1089,17 +1091,19 @@ class RawHeader(object):
                 if isinstance(dirindex, dict):
                     dirindex = dirindex['value']
                 if len(dirindex) != len(files):
-                    # XXX should never happen
+                    # should not happen
                     print(f'Directory index length mismatch: '
                           f'{len(dirindex)} != {len(files)}')
+                    # leave these ungrouped
                 else:
                     for i, finfo in enumerate(files):
                         dirnum = dirindex[i]
                         if dirnum >= len(dirnames):
+                            # TODO can we detect this earlier and skip grouping?
                             raise ValueError(f'Directory index value out of bounds: {dirnum}')
                         finfo['dirname'] = dirnames[dirnum]
-                del idx['dirnames']
-                del idx['dirindexes']
+                    del idx['dirnames']
+                    del idx['dirindexes']
 
             # defererence file classes
             # Fileclass           | 1141 | int32 array  | Index into Classdict
@@ -1114,10 +1118,13 @@ class RawHeader(object):
                         if cls_idx >= len(classes):
                             raise ValueError(f'File class index out of bounds: {cls_idx}')
                         finfo['class'] = classes[cls_idx]
+                        # TODO - check that all of classdict is consumed
                     else:
                         # TODO should we be stricter here?
                         print(f'Warning: no class info for file {finfo}')
                 del idx['classdict']
+
+            # TODO dereference dependsdict
 
         # the other groupings are simpler
         for group, gmap in self.zipmap:
