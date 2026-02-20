@@ -324,9 +324,8 @@ def new_file_entry(lpath, pdir):
     # TODO handle symlinks
     # TODO handle directories
 
-    digest = csum.hexdigest()
     finfo['md5'] = csum.hexdigest()
-    # the primary header name is a misnomer
+    # ^note: the primary header name is a misnomer
 
     return finfo
 
@@ -560,7 +559,7 @@ def build_payload(tmpfile, header, directory):
             continue
         if stat.S_ISDIR(finfo['mode']):
             dlist.append('%(dirname)s%(basename)s' % finfo)
-        #elif stat.S_ISREG(finfo['mode']):
+        # elif stat.S_ISREG(finfo['mode']):
         else:
             flist.append('%(dirname)s%(basename)s' % finfo)
         # TODO do I need to distinguish more types?
@@ -778,7 +777,6 @@ def explode_payload_cpio(fn, dest):
     cmd3 = ['chmod', '-R', 'u+rw', dest]
     p3 = subprocess.Popen(cmd3)
     assert p3.wait() == 0
-
 
 
 # Constants #
