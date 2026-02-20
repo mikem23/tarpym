@@ -138,20 +138,11 @@ def create_rpm(directory, rpmfile=None):
 
     # write out payload first so we can update the header
     tmpfile = tempfile.TemporaryFile('w+b')
-    p_info = {}
     if args.no_payload:
         # skip payload
-        pass
-    elif args.raw_payload:
-        # TODO detect conflicting args
-        p_info = dup_payload(tmpfile, header, directory)
-        # TODO fetch p_info from old sighdr
-    elif args.payload == 'rpmbuild':
-        # use rpmbuild
-        p_info = build_payload(tmpfile, header, directory)
-    elif args.payload == 'cpio':
-        # use cpio
-        p_info = write_payload(tmpfile, header, directory)
+        p_info = {}
+    else:
+        p_info = get_payload(tmpfile, header, directory)
 
     # make lead
     lead_fn = os.path.join(directory, 'lead.json')
@@ -451,6 +442,23 @@ def make_lead(header, data=None):
 def make_header(header):
     rh = RawHeader(header, is_sig=False)
     return rh.header
+
+
+def get_payload(tmpfile, header, directory):
+    # first check for a raw payload
+    pfile = f'{directory}/payload.bin'
+    if os.path.exists(pfile):
+        # TODO detect conflicting args
+        # TODO fetch p_info from old sighdr
+        return dup_payload(tmpfile, header, directory)
+
+    # otherwise we construct it
+    if args.payload == 'rpmbuild':
+        # use rpmbuild
+        return build_payload(tmpfile, header, directory)
+    elif args.payload == 'cpio':
+        # use cpio
+        return write_payload(tmpfile, header, directory)
 
 
 def dup_payload(tmpfile, header, directory):
