@@ -462,6 +462,7 @@ def get_payload(tmpfile, header, directory):
 
 
 def dup_payload(tmpfile, header, directory):
+    ret = {}
     pfile = f'{directory}/payload.bin'
     if not os.path.exists(pfile):
         raise Exception(f'Missing payload file: {pfile}')
@@ -474,7 +475,14 @@ def dup_payload(tmpfile, header, directory):
 
     # we don't touch the header since we have not changed the payload
 
-    return {}  # XXX?
+    # in this case, we should be able to reuse the payloadsize from the sighdr
+    sigfile = f'{directory}/sig.json'
+    if os.path.exists(sigfile):
+        with open(sigfile, 'rt') as fd:
+            oldsighdr = json.load(fd, object_hook=OrderedDict)
+            ret['sighdr'] = oldsighdr
+
+    return ret
 
 
 def write_payload(tmpfile, header, directory):
