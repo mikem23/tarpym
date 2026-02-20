@@ -461,7 +461,6 @@ def dup_payload(tmpfile, header, directory):
     print(f'Re-using payload from {pfile}')
 
     with open(pfile, 'rb') as inp:
-        inp.seek(start)
         # TODO verify checksum
         shutil.copyfileobj(inp, tmpfile)
 
